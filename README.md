@@ -4,6 +4,8 @@
 [![Release](https://github.com/w6rsty/vkquery-rs/actions/workflows/release.yml/badge.svg)](https://github.com/w6rsty/vkquery-rs/actions/workflows/release.yml)
 [![Pre-built shards](https://github.com/w6rsty/vkquery-rs/actions/workflows/shards.yml/badge.svg)](https://github.com/w6rsty/vkquery-rs/actions/workflows/shards.yml)
 
+English · [简体中文](docs/README.zh-CN.md)
+
 Fast, version-pinned query layer over [Khronos Vulkan-Docs](https://github.com/KhronosGroup/Vulkan-Docs).
 Ask the Vulkan spec questions like "what are the VUIDs for `vkCmdDraw`?",
 "which structs extend `VkImageCreateInfo`'s pNext chain?", or "what
