@@ -10,6 +10,7 @@
 pub mod api;
 pub mod cache;
 pub mod cli;
+pub mod config_info;
 pub mod docs_source;
 pub mod git;
 pub mod index;

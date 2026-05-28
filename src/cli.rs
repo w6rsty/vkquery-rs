@@ -102,6 +102,11 @@ pub enum Cmd {
         #[command(subcommand)]
         action: CacheAction,
     },
+    /// Print runtime configuration: cache dir, docs path, env vars, features.
+    Config {
+        #[arg(long)]
+        json: bool,
+    },
     /// Run the MCP stdio server.
     Mcp,
 }
@@ -176,6 +181,7 @@ pub fn run() -> Result<()> {
         Cmd::Index { action } => run_index(action),
         Cmd::Docs { action } => run_docs(action),
         Cmd::Cache { action } => run_cache(action),
+        Cmd::Config { json } => run_config(json),
         Cmd::Mcp => {
             #[cfg(feature = "mcp")]
             {
@@ -272,6 +278,16 @@ fn gc(cache: &Cache, keep_last: usize) -> Result<()> {
             "kept": keep,
         }))?
     );
+    Ok(())
+}
+
+fn run_config(json: bool) -> Result<()> {
+    let snap = crate::config_info::snapshot();
+    if json {
+        println!("{}", crate::config_info::render_json(&snap)?);
+    } else {
+        print!("{}", crate::config_info::render_human(&snap));
+    }
     Ok(())
 }
 
