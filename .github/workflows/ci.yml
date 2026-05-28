@@ -47,11 +47,16 @@ jobs:
         # The two backwards-compat tests (`parses_v1_3_250_vk_xml`,
         # `parses_v1_0_40_core_vk_xml`) self-skip when those tags aren't
         # local — that's intentional, full history isn't worth ~200MB.
+        # `--depth=1` clone doesn't bring tag refs, so fetch v* tags as
+        # shallow refs separately. `list_tags_returns_v1_tags` asserts
+        # >50 v1.x.y tags exist locally.
         shell: bash
         run: |
           git clone --depth=1 --filter=blob:none \
             https://github.com/KhronosGroup/Vulkan-Docs.git \
             ../Vulkan-Docs
+          git -C ../Vulkan-Docs fetch --depth=1 --filter=blob:none \
+            origin 'refs/tags/v*:refs/tags/v*'
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
