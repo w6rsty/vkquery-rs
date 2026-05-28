@@ -319,9 +319,9 @@ pub fn search_concept(query: &str, tag: &str, k: usize, mode: &str) -> Result<Ve
         #[cfg(feature = "embed")]
         "embed" => {
             let emb_dir = shard.embeddings_dir();
-            if !emb_dir.join("vectors.f32").is_file() {
+            if !crate::search::embedding::index_usable(&emb_dir) {
                 return Err(anyhow!(
-                    "no embedding index at {} — run `vkquery index build --tag {tag} --force` first",
+                    "no usable embedding index at {} — run `vkquery index build --tag {tag} --force` (or unset VKQUERY_SKIP_EMBED) to populate it",
                     emb_dir.display()
                 ));
             }
@@ -331,15 +331,29 @@ pub fn search_concept(query: &str, tag: &str, k: usize, mode: &str) -> Result<Ve
         "hybrid" => {
             let bm25 = crate::search::bm25::Bm25::load(&shard.bm25_dir())
                 .context("load BM25 index for hybrid mode")?;
+            let wide = k.saturating_mul(2).max(k + 5);
+            let lexical = bm25.search(query, wide);
+            // Mirror Python's `search_concept`: when embeddings are missing
+            // or fail to load, warn and fall back to BM25-only RRF (which
+            // degenerates to the BM25 ranking, deduped).
             let emb_dir = shard.embeddings_dir();
-            if !emb_dir.join("vectors.f32").is_file() {
-                return Err(anyhow!(
-                    "hybrid mode needs embeddings; build the shard with --features embed enabled"
-                ));
-            }
-            let lexical = bm25.search(query, k.saturating_mul(2).max(k + 5));
-            let semantic =
-                crate::search::embedding::search_shard(&emb_dir, query, k.saturating_mul(2).max(k + 5))?;
+            let semantic = if crate::search::embedding::index_usable(&emb_dir) {
+                match crate::search::embedding::search_shard(&emb_dir, query, wide) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::warn!(
+                            "hybrid: embedding search failed ({e:?}); falling back to BM25-only"
+                        );
+                        Vec::new()
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    "hybrid: no usable embedding index at {} — falling back to BM25-only (rebuild with `vkquery index build --tag {tag} --force` to enable semantic results)",
+                    emb_dir.display()
+                );
+                Vec::new()
+            };
             Ok(crate::search::hybrid::rrf(&lexical, &semantic, k))
         }
         #[cfg(not(feature = "embed"))]

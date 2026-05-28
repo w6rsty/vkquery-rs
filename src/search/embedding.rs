@@ -39,6 +39,24 @@ pub fn resolved_model() -> String {
     std::env::var("VKQUERY_EMBEDDING_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string())
 }
 
+/// Whether a shard's embedding directory is populated enough to query against.
+/// Guards against half-written shards (e.g. an aborted build that left
+/// zero-byte `vectors.f32` / `meta.jsonl` and no `model.txt`).
+pub fn index_usable(emb_dir: &Path) -> bool {
+    let model_ok = emb_dir.join("model.txt").is_file();
+    let vec_ok = emb_dir
+        .join("vectors.f32")
+        .metadata()
+        .map(|m| m.len() > 0)
+        .unwrap_or(false);
+    let meta_ok = emb_dir
+        .join("meta.jsonl")
+        .metadata()
+        .map(|m| m.len() > 0)
+        .unwrap_or(false);
+    model_ok && vec_ok && meta_ok
+}
+
 /// One-shot encoder for callers that don't want a persistent index — useful
 /// for parity tests and ad-hoc tooling. Re-loads the model on every call;
 /// don't use in hot paths.
