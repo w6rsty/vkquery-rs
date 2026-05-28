@@ -39,6 +39,50 @@ pub fn resolved_model() -> String {
     std::env::var("VKQUERY_EMBEDDING_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string())
 }
 
+/// Pick the best available candle backend for BERT inference.
+///
+/// Precedence:
+///   1. `VKQUERY_FORCE_CPU=1` — hard override (debug / VRAM-exhausted machines).
+///   2. `cuda` feature → `Device::new_cuda(0)`; warn + CPU fallback on failure.
+///   3. `metal` feature → `Device::new_metal(0)`; warn + CPU fallback on failure.
+///   4. Otherwise → `Device::Cpu`.
+///
+/// CPU BERT-small on Windows runs ~32 vec / 30s; an entry-level CUDA GPU
+/// (RTX 3060-class) brings this to ~1000+ vec/s — 7 hours → minutes for
+/// a full HEAD embed.
+fn pick_device() -> Device {
+    if std::env::var("VKQUERY_FORCE_CPU").is_ok() {
+        tracing::info!("embedding: VKQUERY_FORCE_CPU set, using CPU");
+        return Device::Cpu;
+    }
+    #[cfg(feature = "cuda")]
+    {
+        match Device::new_cuda(0) {
+            Ok(d) => {
+                tracing::info!("embedding: using CUDA device 0");
+                return d;
+            }
+            Err(e) => {
+                tracing::warn!("embedding: CUDA init failed ({e:?}); falling back to CPU");
+            }
+        }
+    }
+    #[cfg(feature = "metal")]
+    {
+        match Device::new_metal(0) {
+            Ok(d) => {
+                tracing::info!("embedding: using Metal device 0");
+                return d;
+            }
+            Err(e) => {
+                tracing::warn!("embedding: Metal init failed ({e:?}); falling back to CPU");
+            }
+        }
+    }
+    tracing::info!("embedding: using CPU");
+    Device::Cpu
+}
+
 /// Whether a shard's embedding directory is populated enough to query against.
 /// Guards against half-written shards (e.g. an aborted build that left
 /// zero-byte `vectors.f32` / `meta.jsonl` and no `model.txt`).
@@ -126,7 +170,7 @@ fn load_model(model_id: &str) -> Result<LoadedModel> {
     let tokenizer = Tokenizer::from_file(&tokenizer_path)
         .map_err(|e| anyhow!("load tokenizer: {e}"))?;
 
-    let device = Device::Cpu;
+    let device = pick_device();
     let vb = unsafe {
         VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)
             .context("load safetensors via VarBuilder")?
@@ -397,3 +441,44 @@ pub fn search_shard(emb_dir: &Path, query: &str, k: usize) -> Result<Vec<SearchH
 
 // `Tensor::i(...)` lives behind the IndexOp trait; bring it in.
 use candle_core::IndexOp;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression guard for the runtime device dispatch. When the binary is
+    /// built with the `cuda` feature we expect `pick_device()` to actually
+    /// return a CUDA device on a machine that has one — otherwise the build
+    /// silently runs on CPU and 27K-text embeds take 7 hours instead of
+    /// minutes. The CPU build of the same test asserts the inverse.
+    #[test]
+    fn pick_device_honors_compile_features() {
+        // Hard override always wins. Verify by reading the env var after,
+        // not before, so we don't trample the developer's shell.
+        let prev = std::env::var("VKQUERY_FORCE_CPU").ok();
+        std::env::set_var("VKQUERY_FORCE_CPU", "1");
+        assert!(matches!(pick_device(), Device::Cpu));
+        match prev {
+            Some(v) => std::env::set_var("VKQUERY_FORCE_CPU", v),
+            None => std::env::remove_var("VKQUERY_FORCE_CPU"),
+        }
+
+        let d = pick_device();
+        #[cfg(feature = "cuda")]
+        {
+            // If this fires on a CUDA-feature build, candle could not init
+            // the device (no driver / wrong toolkit / no GPU). The runtime
+            // already logged a warn and we fell back to CPU — but the test
+            // still flags it so the user knows the GPU path is dead.
+            assert!(
+                d.is_cuda(),
+                "cuda feature built but pick_device() returned non-CUDA: {d:?}",
+            );
+        }
+        #[cfg(all(not(feature = "cuda"), not(feature = "metal")))]
+        {
+            assert!(matches!(d, Device::Cpu));
+        }
+        let _ = d;
+    }
+}
