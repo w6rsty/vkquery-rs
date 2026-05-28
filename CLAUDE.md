@@ -1,46 +1,51 @@
 # CLAUDE.md — vkquery (Rust)
 
-Agent entrypoint for the Rust port of `vkquery`. Read this first.
+Agent entrypoint for `vkquery-rs`. Read this first.
 
 ## What this repo is
 
-`vkquery-rs` is a Rust rewrite of the Python `vkquery` package
-(reference impl at `../vkquery/`). Same 8 query primitives, same shard
-layout, same Vulkan-Docs git-tag pinning. Goal: single static binary
-(currently ~3.7MB stripped on Windows x86-64 with `--no-default-features
---features mcp`; ~13MB with default features which include `embed`).
-Both impls write to the same cache so the Rust build can read
-Python-built shards and vice versa.
+`vkquery-rs` is a single-binary query/retrieval layer over Khronos
+Vulkan-Docs, written in Rust. 8 query primitives, all version-pinned
+via `--tag v1.x.y`. Three frontends share one cache: CLI, Rust library,
+MCP stdio server. Slim build ~3.7MB (`--no-default-features --features
+mcp`); default build with semantic search ~13MB.
+
+Shard layout is **content-addressed** on the git blob SHA of `xml/vk.xml`,
+so the cache is byte-stable and portable across machines — pre-built
+shards published by `.github/workflows/shards.yml` extract straight
+into `$VKQUERY_CACHE_DIR`.
 
 ## Where to read next
 
 | If you're doing… | Read |
 |---|---|
-| **Understanding the port** — what's done, what's deferred, why | this file + git log |
-| **CLI / library / MCP usage** (detailed) | [`docs/usage.md`](docs/usage.md) |
-| **Quick reference** | `README.md` |
-| **Hitting parity gaps** | look at `tests/fixtures/implicit_vuids_head.json` and compare via the Python shard at `%LOCALAPPDATA%\vkquery\tags\HEAD\<sha>\` |
-| **Adding a new query / index** | mirror the matching Python module in `../vkquery/src/vkquery/` |
+| **Architecture overview** — data flow, design decisions, "why" | [`docs/architecture.md`](docs/architecture.md) |
+| **CLI / library / MCP usage** | [`docs/usage.md`](docs/usage.md) |
+| **Cache JSON schemas** | [`docs/data-model.md`](docs/data-model.md) |
+| **Adding a query / index / search backend** | [`docs/extending.md`](docs/extending.md) |
+| **Debugging a failure** | [`docs/troubleshooting.md`](docs/troubleshooting.md) |
+| **User-facing quick reference** | `README.md` |
+| **Checking implicit VUID derivation hasn't drifted** | diff `tests/fixtures/implicit_vuids_head.json` against a freshly built HEAD shard (recipe in `docs/usage.md` 6.4) |
 
 ## Project conventions
 
 1. **Cache layout is the contract**. JSON files under
-   `<root>/tags/<tag>/<vkxml_sha[:12]>/` must stay byte-stable with
-   Python's `json.dumps(..., indent=2, sort_keys=True)`. `serde_json::Map`
-   is BTreeMap-backed by default, so emitting via `json!({...})` already
-   gives sorted keys; struct-derive `Serialize` emits in field declaration
-   order — when in doubt build via the `json!` macro.
+   `<root>/tags/<tag>/<vkxml_sha[:12]>/` must be byte-stable across
+   machines. `serde_json::Map` is BTreeMap-backed by default, so emitting
+   via `json!({...})` already gives sorted keys; `#[derive(Serialize)]`
+   emits in field declaration order — when in doubt build via the
+   `json!` macro.
 2. **New indices must be added to `XML_INDEX_NAMES`** in
    `src/index/build.rs`. That's the freshness gate.
 3. **Optional deps stay optional**. `embed` and `mcp` are cargo features
-   and are both in the default set (candle 0.8 bump landed). For a slim
-   ~3.7MB binary build with `--no-default-features --features mcp`. GPU
-   backends (`cuda`, `cudnn`, `mkl`, `accelerate`, `metal`) are mutually
-   exclusive and each implies `embed` — see `Cargo.toml` for the matrix.
-4. **Don't fork Vulkan-Docs parsing**. The python ref reuses `reg.py` /
-   `validitygenerator.py`. The Rust port re-derives — when implicit VUID
-   rules drift upstream, fix the rule in `src/index/vuid_implicit.rs` and
-   refresh `tests/fixtures/implicit_vuids_head.json` in the same PR.
+   and are both in the default set. For a slim ~3.7MB binary build with
+   `--no-default-features --features mcp`. GPU backends (`cuda`, `cudnn`,
+   `mkl`, `accelerate`, `metal`) are mutually exclusive and each implies
+   `embed` — see `Cargo.toml` for the matrix.
+4. **Implicit VUID derivation is a Rust reimplementation of upstream's
+   `ValidityOutputGenerator`**. When upstream rules drift, fix the rule
+   in `src/index/vuid_implicit.rs` and refresh
+   `tests/fixtures/implicit_vuids_head.json` in the same PR.
 5. **Tests assume a sibling `..\Vulkan-Docs` clone**. Integration tests
    walk up `CARGO_MANIFEST_DIR` looking for one.
 
@@ -48,7 +53,7 @@ Python-built shards and vice versa.
 
 ```powershell
 $env:VKQUERY_CACHE_DIR = "C:\dev\vkquery-rs\target\cache"
-cargo test --features mcp                                              # 31 tests, ~1m warm
+cargo test --features mcp                                              # 32 tests, ~1m warm
 cargo run --features mcp -- function vkCmdDraw --tag HEAD               # full payload incl. VUIDs
 cargo run --features mcp -- diff v1.3.250 v1.4.350 --entity features    # shows VK_VERSION_1_4 added
 cargo run --features mcp -- search "image layout transition" --mode bm25 -k 3
@@ -93,12 +98,13 @@ src/
     vuid_implicit.rs   re-derives ValidityOutputGenerator rules from XML attrs
   search/
     bm25.rs            from-scratch Okapi BM25 (k1=1.5, b=0.75, eps=0.25)
-    hybrid.rs / embedding.rs    (deferred — feature: embed)
+    hybrid.rs          RRF fusion of BM25 + embedding top-k (feature: embed)
+    embedding.rs       candle 0.8 + bge-small-en-v1.5 (feature: embed)
 tests/
   integration.rs       end-to-end against sibling Vulkan-Docs clone
-  parity_bm25.rs       R6 BM25 top-5 parity vs Python fixture
+  parity_bm25.rs       BM25 top-5 fixture diff (tests/fixtures/bm25_top5_head.json)
   embeddings_sanity.rs cosine-similarity sanity for bge-small
-  fixtures/            golden implicit VUID dump + Python BM25 top-5 fixture
+  fixtures/            golden implicit VUID dump + BM25 top-5 fixture
 docs/
   usage.md             detailed CLI / library / MCP usage manual
 .github/workflows/
@@ -107,15 +113,21 @@ docs/
   shards.yml           HEAD + latest 5 v1.x.y tags → slim shard tarballs; weekly schedule + workflow_dispatch + workflow_call
 ```
 
-## Status (R0–R9 of the rewrite plan)
+## Feature checklist
 
-| R | Done | Notes |
-|---|---|---|
-| R0–R3 | ✓ | scaffold, registry parser, XML index + 5 queries, tag/diff |
-| R4 explicit VUIDs | ✓ | 100% id, 100% text vs Python |
-| R5 implicit VUIDs | ✓ (100.00% recall / 100.00% precision, 6575/6575) | text parity 92.1% — remaining drift is asciidoc markup / whitespace micro-differences |
-| R6 BM25 search | ✓ | `tests/parity_bm25.rs` passes; fixture in `tests/fixtures/bm25_top5_head.json` (regen via `target/dump_bm25_top5.py`) |
-| R7 MCP server | ✓ | 8 tools registered, init+tools/list+tools/call verified |
-| R7 candle embeddings | ✓ | candle 0.8 + bge-small; CPU is the bottleneck (`VKQUERY_EMBED_LIMIT` for fast iteration) |
-| R8 polish | ✓ | README + CLAUDE.md + docs/usage.md done; `.github/workflows/ci.yml` (3-OS test matrix + linux embed build) and `release.yml` (3-target binaries + sha256 + GH Release on `v*` tags) landed |
-| R9 pre-built shard distribution | ✓ | `.github/workflows/shards.yml` publishes HEAD + latest 5 v1.x.y slim shards to a rolling `shards-latest` release weekly; `release.yml` invokes it via `workflow_call` so v* releases bundle the same shards; `vkquery cache info` exposes the local cache layout to users |
+All major features are implemented and tested. Use this as a quick
+reference for what's available and where the trade-offs live.
+
+| Feature | State |
+|---|---|
+| Registry parser + 5 XML queries (function / struct / extensions / callers / deps) | ✓ — `src/registry/`, `src/index/xml_index.rs`, `src/index/reverse.rs` |
+| Version diff (`diff v1 v2 --entity …`) | ✓ — `src/index/diff.rs` |
+| Explicit VUIDs (chapters/*.adoc with `ifdef::` + `commonvalidity` expansion) | ✓ — 19,833 entries on HEAD; `src/index/vuid_explicit.rs` |
+| Implicit VUIDs (re-derived from XML attrs) | ✓ — 6,573/6,575 IDs; 2 char[N] static-length rules still TODO; `src/index/vuid_implicit.rs` |
+| BM25 search | ✓ — pure-Rust Okapi (k1=1.5, b=0.75, eps=0.25); fixture diff in `tests/parity_bm25.rs` |
+| Semantic embeddings | ✓ — candle 0.8 + bge-small-en-v1.5; CPU is slow (~32 vec/30s), set `VKQUERY_EMBED_LIMIT=N` for fast iteration; GPU backends via `cuda`/`metal`/`mkl` features |
+| Hybrid search (RRF fusion) | ✓ — `src/search/hybrid.rs`, c=60; falls back to BM25-only if embeddings unavailable |
+| MCP server | ✓ — 8 `vk_*` tools, stdio transport; `vkquery mcp` |
+| CI (3-OS test matrix + linux embed build) | ✓ — `.github/workflows/ci.yml` |
+| Release pipeline (3-target binaries + sha256 + GitHub Release on `v*`) | ✓ — `.github/workflows/release.yml` |
+| Pre-built shard distribution (HEAD + latest 5 v1.x.y slim shards, weekly + per-v*) | ✓ — `.github/workflows/shards.yml`; `vkquery cache info` for local introspection |

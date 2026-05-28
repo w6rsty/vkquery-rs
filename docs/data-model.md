@@ -5,8 +5,7 @@
 > 产出下面所有文件。`builder_version` 字符串（`src/cache.rs` 常量）
 > 一旦被 bump，所有旧 shard 视为失效。
 
-Rust 与 Python 实现 shard 字节级互通——JSON 结构完全一致，目录命名规则
-相同。本文档列出每个文件的 schema；新增字段或重命名都要同步
+本文档列出每个文件的 schema；新增字段或重命名都要同步
 [extending.md](extending.md) 的 "Don't bump builder_version casually" 规则。
 
 ## 目录布局
@@ -284,7 +283,8 @@ forward map `{alias: canonical}`。一跳就够；调用方需要传递闭包则
   / `zerobitmask` 等）。
 - `source_file`：来源文件。implicit VUIDs 用虚拟路径
   `generated/validity/protos/<entity>.adoc` 或
-  `generated/validity/structs/<entity>.adoc`，与 Python 一致。
+  `generated/validity/structs/<entity>.adoc`，沿用 Vulkan-Docs
+  `validitygenerator.py` 的命名习惯。
 
 explicit 与 implicit 有同 id 时（罕见），explicit 优先——人写的文本
 通常更易读。
@@ -339,8 +339,9 @@ explicit 与 implicit 有同 id 时（罕见），explicit 优先——人写的
   不持久化。
 
 corpus 包含 prose 章节段与 VUID 文本两类 doc，由 `kind` 字段区分。
-Python 端用 `corpus.pkl` 保存 `rank_bm25.BM25Okapi` 实例，Rust 端
-拆成纯 JSON 是为了跨语言可读 + 避免 Python 的 pickle 安全风险。
+持久化用纯 JSON 而不是序列化 BM25 模型对象，是为了避免任何特定语言
+的反序列化机制（pickle / serde-bincode 等）成为加载 shard 的硬依赖。
+IDF 在 `Bm25::from_docs` 加载时一次性算出，~22K docs 不到 1s。
 
 ## embeddings/
 
@@ -354,6 +355,6 @@ Python 端用 `corpus.pkl` 保存 `rank_bm25.BM25Okapi` 实例，Rust 端
 - **`model.txt`**：UTF-8 单行的模型 id（如
   `BAAI/bge-small-en-v1.5`）。查询时从这个文件读模型，与 build 时一致。
 
-Python 用 FAISS `IndexFlatIP`，Rust 用扁平 `Vec<f32>` 暴力扫描——
-22K vec × 384 dim 的点积在 ~3ms 内即可（即使纯标量）；上 FAISS
-对单进程 single-shard 工作负载没必要。
+查询用扁平 `Vec<f32>` 暴力点积——22K vec × 384 dim 在 ~3ms 内即可
+（即使纯标量实现），单进程 single-shard 工作负载上 ANN 索引（FAISS /
+hnswlib 等）的开销并不划算。

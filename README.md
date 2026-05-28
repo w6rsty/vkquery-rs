@@ -1,16 +1,54 @@
 # vkquery (Rust)
 
-Query/retrieval layer over [Khronos Vulkan-Docs](https://github.com/KhronosGroup/Vulkan-Docs).
-Single static binary (~2.5MB stripped on Windows x86-64). No Python, no Ruby,
-no `asciidoctor` required to query the spec.
+Fast, version-pinned query layer over [Khronos Vulkan-Docs](https://github.com/KhronosGroup/Vulkan-Docs).
+Ask the Vulkan spec questions like "what are the VUIDs for `vkCmdDraw`?",
+"which structs extend `VkImageCreateInfo`'s pNext chain?", or "what
+changed between v1.3.250 and v1.4.350?" — get JSON back in milliseconds.
 
-This is a Rust port of the Python `vkquery` reference (lives at
-`../vkquery/`). Both implementations write to the same content-addressed
-shard layout so they can read each other's caches.
+Single static binary (~3.7MB slim, ~13MB with semantic search). No
+Python, no Ruby, no `asciidoctor` required at query time.
 
-## What it gives you
+## Why vkquery?
 
-8 query primitives, all version-pinned via `--tag <v1.x.y>`:
+The Vulkan-Docs repo (vk.xml + asciidoc chapters) is the canonical
+source for the spec, but it's built to render into a human-readable
+PDF/HTML, not to be queried programmatically. Several common questions
+need a full Ruby + Asciidoctor (+ Python `ValidityOutputGenerator`)
+spec build to answer, or careful hand-grepping. vkquery turns each
+into a one-liner:
+
+| Question | Without vkquery | With vkquery |
+|---|---|---|
+| "What are the VUIDs for `vkCmdDraw` at v1.4.352?" | Clone Vulkan-Docs, install Ruby + Asciidoctor + the `vu-to-json` extension, run a full spec build per tag (~minutes), parse `validusage.json`. Or grep `chapters/*.adoc` by hand while tracking `ifdef::EXT[]` guards mentally. | `vkquery function vkCmdDraw --tag v1.4.352` |
+| "Which structs extend `VkImageCreateInfo`'s pNext chain?" | Scan every `<type structextends="...">` in vk.xml yourself — not surfaced by any upstream tool. | included in `vkquery struct VkImageCreateInfo` |
+| "Which commands consume `VkImage`?" | Manual XML sweep over every `<param>` / `<member>`. | `vkquery callers VkImage` |
+| "What changed between v1.3.250 and v1.4.350?" | Two git checkouts, two full spec parses, hand-diff. | `vkquery diff v1.3.250 v1.4.350 --entity features` |
+| "Find the section about image layout transitions, by meaning not just keywords." | No upstream tool — roll your own BM25 / embedding pipeline over ~85 asciidoc files. | `vkquery search "image layout transition" --mode hybrid` |
+| "Wire spec lookup into an LLM agent." | Hand-roll JSON wrappers around the above, manage caches, strip asciidoc markup. | `vkquery mcp` — 8 typed MCP tools, drop-in for Claude Code / Cursor / any MCP client. |
+
+**Implicit VUIDs are the headline difference.** Upstream's
+`ValidityOutputGenerator` emits ~6,500 parameter-validity / parent-handle
+/ command-pool constraints during the asciidoctor spec build — they
+don't exist as a queryable artifact otherwise. vkquery re-derives them
+in pure Rust at index time, so the full set ships alongside the
+explicit VUIDs from your first query, with no spec build toolchain on
+your machine.
+
+Net effect: spec lookups go from "set up a multi-language build
+environment" to "download a 4MB binary".
+
+## Features
+
+- **8 query primitives** for functions, structs, extensions, callers,
+  dependencies, VUIDs, version diffs, and prose search
+- **Version-pinned** — every query takes `--tag v1.x.y` so answers track
+  the spec revision you care about
+- **Three frontends** — CLI, Rust library (`use vkquery::api::*;`), and
+  MCP stdio server (8 tools, drop-in for any MCP client)
+- **Three search modes** — lexical BM25, semantic BERT embeddings, and
+  hybrid RRF fusion
+- **Pre-built shards on GitHub Releases** — skip the first-query
+  indexing cost; one tarball per recent v1.x.y tag
 
 | Query | Answers |
 |---|---|
@@ -20,43 +58,44 @@ shard layout so they can read each other's caches.
 | `diff <v1> <v2> [--entity …]` | added / removed / changed / promoted between tags |
 | `callers <type>` | every command/struct that consumes this type |
 | `deps <function>` | parent handle chain, required exts/features, pNext, externsync, queue/renderpass |
-| `vuid <id>` | the rule text + source file + guard extensions |
-| `search <query> [--mode bm25\|embed\|hybrid]` | BM25 over prose + VUID text (embed/hybrid land with R7) |
-
-Three frontends share that surface: the CLI, the library (`use vkquery::api::*;`),
-and the MCP stdio server (`vkquery mcp` exposes the same 8 calls as MCP tools).
+| `vuid <id>` | rule text + source file + guard extensions |
+| `search <query> [--mode bm25\|embed\|hybrid]` | BM25 / semantic / hybrid over prose + VUID text |
 
 ## Install
 
 ```bash
-cargo install --path .                       # default features = mcp + embed (~8MB binary)
-cargo install --path . --features mcp        # without embed (~2.5MB skinny build)
-cargo install --path . --no-default-features # library / CLI only, no MCP, no embed
+cargo install --path .                                       # default — mcp + embed (~13MB)
+cargo install --path . --no-default-features --features mcp  # slim (~3.7MB), no semantic search
+cargo install --path . --no-default-features                 # library only, no MCP, no embed
 ```
 
-Or grab the prebuilt `mcp`-only binary for your platform from
-[GitHub Releases](https://github.com/w6rsty/vkquery-rs/releases) (Linux x86-64,
-macOS arm64, Windows x86-64; GPU backends still need `cargo install` from
-source). For development:
+Or grab a pre-built `mcp`-only binary from
+[GitHub Releases](https://github.com/w6rsty/vkquery-rs/releases) for
+Linux x86-64, macOS arm64, or Windows x86-64. GPU backends (CUDA, Metal,
+MKL) require `cargo install` from source.
+
+For development:
 
 ```bash
 cargo build --release --features embed,mcp
 ```
 
-On first `search --mode embed` call (or first `index build` with `embed`
-feature on), the binary downloads `BAAI/bge-small-en-v1.5` (~130MB) into
-`<dirs::cache_dir>/vkquery/models/BAAI--bge-small-en-v1.5/`.
+On first `search --mode embed` call (or first `index build` with the
+`embed` feature on), the binary downloads `BAAI/bge-small-en-v1.5`
+(~130MB) into `<dirs::cache_dir>/vkquery/models/BAAI--bge-small-en-v1.5/`.
 
-The binary auto-clones the Vulkan-Docs repo on first run (into `%LOCALAPPDATA%\vkquery\Vulkan-Docs\`
-on Windows or `$XDG_CACHE_HOME/vkquery/Vulkan-Docs/` elsewhere). Override the
-clone location with `VKQUERY_DOCS_PATH=<path>`. Override the cache with
+The binary auto-clones the Vulkan-Docs repo on first run (into
+`%LOCALAPPDATA%\vkquery\Vulkan-Docs\` on Windows or
+`$XDG_CACHE_HOME/vkquery/Vulkan-Docs/` elsewhere). Override the clone
+location with `VKQUERY_DOCS_PATH=<path>`. Override the cache with
 `VKQUERY_CACHE_DIR=<path>`.
 
 ### Pre-built shards (optional)
 
-Each `function` / `struct` / … call lazily builds the shard for the requested
-tag on first use (~minutes per tag, including the BM25 corpus build). To skip
-that one-time cost, drop a pre-built slim shard into your cache:
+Each `function` / `struct` / … call lazily builds the shard for the
+requested tag on first use (~minutes per tag, including the BM25 corpus
+build). To skip that one-time cost, drop a pre-built slim shard into
+your cache:
 
 ```bash
 # Find where vkquery wants its cache to live:
@@ -68,23 +107,24 @@ curl -L -o vkquery-shard-v1.4.352-slim.tar.gz \
 tar -xzf vkquery-shard-v1.4.352-slim.tar.gz -C "$VKQUERY_CACHE_DIR"
 ```
 
-Pre-built shards live on the rolling [`shards-latest`](https://github.com/w6rsty/vkquery-rs/releases/tag/shards-latest)
-release (refreshed weekly with HEAD + the 5 most recent `v1.x.y` tags) and
-also appear as assets on each `v*` binary release. Tarballs are slim — they
-contain the BM25 + XML indices but **not** the BERT embeddings layer. To use
-`--mode embed` / `--mode hybrid`, run `vkquery index build --tag <T> --force`
-once after extraction so the local embedding pass runs alongside the
-already-extracted shard.
+Pre-built shards live on the rolling
+[`shards-latest`](https://github.com/w6rsty/vkquery-rs/releases/tag/shards-latest)
+release (refreshed weekly with HEAD + the 5 most recent `v1.x.y` tags)
+and also appear as assets on each `v*` binary release. Tarballs are
+slim — they contain the BM25 + XML indices but **not** the BERT
+embeddings layer. To use `--mode embed` / `--mode hybrid`, run
+`vkquery index build --tag <T> --force` once after extraction so the
+local embedding pass runs alongside the already-extracted shard.
 
 Windows users: `tar.exe` ships with Windows 10+; the recipe above works
 unchanged in PowerShell.
 
 ## GPU acceleration
 
-CPU BERT inference on Windows without MKL clocks ~32 vec/30s, so a full HEAD
-embed (~27K texts) takes ~7h. For production use, build with one of these
-mutually-exclusive cargo features — each one implies `embed`, so you do
-**not** also need to pass `--features embed`:
+CPU BERT inference on Windows without MKL clocks ~32 vec/30s, so a full
+HEAD embed (~27K texts) takes ~7h. For production use, build with one
+of these mutually-exclusive cargo features — each one implies `embed`,
+so you do **not** also need to pass `--features embed`:
 
 | Feature | Backend | Platform | Notes |
 |---|---|---|---|
@@ -117,9 +157,9 @@ vkquery vuid VUID-vkCmdDraw-None-02691
 vkquery search "image layout transition" --mode bm25 -k 3
 ```
 
-Each `function` / `struct` / `extensions` / etc. call lazily builds the shard
-for the requested tag if it isn't already in the cache. Cold build for HEAD
-is ~4 seconds; warm queries are <50ms.
+Each `function` / `struct` / `extensions` / etc. call lazily builds the
+shard for the requested tag if it isn't already in the cache. Cold
+build for HEAD is ~4 seconds; warm queries are <50ms.
 
 ## MCP server
 
@@ -132,20 +172,6 @@ The 8 tools expose the same shapes as the CLI (`vk_get_function`,
 `vk_find_dependencies`, `vk_get_vuid`, `vk_search_concept`). Configure your
 client to launch `vkquery mcp` as the command.
 
-## Status (parity vs Python reference)
-
-| Indices | Parity vs `../vkquery/` |
-|---|---|
-| functions / structs / handles / enums / extensions / features / aliases | 100% id, 99.4% byte |
-| explicit VUIDs | 100% id, 100% text (19,833 entries) |
-| implicit VUIDs | **100.00% recall, 100.00% precision** (6575/6575); 92.1% text |
-| BM25 search | parity test `tests/parity_bm25.rs` passes (≥2/5 overlap + ≤5% top-1 score drift) |
-| semantic embeddings (`--mode embed`) | candle 0.8 + bge-small-en-v1.5; 5-sentence sanity ✓ |
-| hybrid search (`--mode hybrid`) | RRF fusion of bm25 + embed lists ✓ |
-
-For detailed usage (CLI / library / MCP / configuration / CI patterns),
-see [docs/usage.md](docs/usage.md).
-
 ## Known gaps
 
 - **Embedding throughput**: CPU BERT on Windows without MKL is ~32 vec/30s,
@@ -153,8 +179,9 @@ see [docs/usage.md](docs/usage.md).
   `VKQUERY_EMBED_LIMIT=N` to cap the corpus, or `VKQUERY_SKIP_EMBED=1`
   to skip embeddings during shard build (BM25 still indexes). Production
   needs `--features cuda` / `--features mkl` (not enabled by default).
-- **R5 implicit VUIDs text drift**: 7.9% of the 6,575 common VUIDs differ from
-  Python by whitespace / asciidoc markup micro-differences. IDs match exactly.
+
+For detailed usage (CLI / library / MCP / configuration), see
+[docs/usage.md](docs/usage.md).
 
 ## License
 

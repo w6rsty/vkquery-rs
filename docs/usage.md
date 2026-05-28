@@ -4,10 +4,6 @@
 共享同一份缓存：CLI、Rust 库、MCP stdio 服务。本文档覆盖所有可用功能与
 具体使用方法。
 
-> 当前状态：R0–R7 全部完成；R5 implicit VUIDs 与 Python 参考实现的 ID
-> 一致率 100.00% / 准确率 100.00%（6575/6575）；R6 BM25 通过形式化 parity 测试。
-> 共 33 个测试通过（`cargo test --features mcp`）。
-
 ## 一、构建与安装
 
 ### 1.1 从源码构建
@@ -15,13 +11,13 @@
 ```bash
 cd C:\dev\vkquery-rs
 
-# 默认配置 = mcp + embed（约 8MB，含 BM25 / 语义搜索 / MCP 服务）
+# 默认 = mcp + embed（约 13MB，含 BM25 / 语义搜索 / MCP 服务）
 cargo build --release
 
-# 仅 BM25 + MCP（约 2.5MB，不含 candle BERT 嵌入）
+# Slim：仅 BM25 + MCP（约 3.7MB，不含 candle BERT 嵌入）
 cargo build --release --no-default-features --features mcp
 
-# 最小（仅库 / CLI，不含 MCP 与嵌入）
+# 最小：仅库 / CLI，不含 MCP 与嵌入
 cargo build --release --no-default-features
 ```
 
@@ -30,23 +26,23 @@ cargo build --release --no-default-features
 | Feature | 作用 | 体积影响 |
 |---|---|---|
 | `mcp` | 启用 `vkquery mcp` 命令；引入 `rmcp 0.2` + `tokio` | +约 1MB |
-| `embed` | 启用语义搜索；引入 `candle-core 0.8` + `tokenizers` + bge-small-en-v1.5 | +约 5MB（不含模型权重） |
+| `embed` | 启用语义搜索；引入 `candle-core 0.8` + `tokenizers` + bge-small-en-v1.5 | +约 9MB（不含模型权重） |
 
 二进制位于 `target/release/vkquery.exe`（Windows）或 `target/release/vkquery`。
 
 ### 1.2 用 cargo install 安装
 
 ```bash
-cargo install --path C:\dev\vkquery-rs
+cargo install --path .
 # 或指定特性
-cargo install --path C:\dev\vkquery-rs --features mcp --no-default-features
+cargo install --path . --features mcp --no-default-features
 ```
 
 ### 1.3 直接下载预编译二进制
 
 每个 `v*` tag 会触发 `.github/workflows/release.yml` 在三个平台
 （`x86_64-unknown-linux-gnu`、`aarch64-apple-darwin`、`x86_64-pc-windows-msvc`）
-构建仅含 `mcp` 特性的精简二进制（约 2.5MB），并连同 SHA256 校验上传到
+构建仅含 `mcp` 特性的精简二进制（约 3.7MB），并连同 SHA256 校验上传到
 [GitHub Releases](https://github.com/w6rsty/vkquery-rs/releases)。需要 GPU
 后端（`cuda` / `metal` / `mkl`）的用户仍需自己 `cargo install` 从源码编译。
 
@@ -421,18 +417,33 @@ for v in v1.0.0 v1.1.0 v1.2.0 v1.3.0 v1.4.0; do
 done
 ```
 
-### 6.4 在 CI 里 catch implicit VUID 回归
+### 6.4 在 CI 里 catch implicit VUID 索引漂移
 
-Rust shard 与 Python shard 完全互通，可以 cross-verify：
+`tests/fixtures/implicit_vuids_head.json` 是 implicit VUID 索引的 golden
+快照。改动 `src/index/vuid_implicit.rs` / `src/registry/parse.rs` /
+`src/registry/schema.rs` 后，重建 HEAD shard 并 diff fixture，以确认
+ID 集没有漂移：
 
-```bash
-# 1) 构建 Rust shard
+```powershell
 $env:VKQUERY_CACHE_DIR = "C:\dev\vkquery-rs\target\cache-ci"
-cargo run --release -- index build --tag HEAD --force
+$env:VKQUERY_SKIP_EMBED = "1"
+cargo run --release --no-default-features --features mcp -- index build --tag HEAD --force
 
-# 2) 用 Python 加载并 diff
-PYTHONPATH=C:\dev\vkquery\src python target/parity_r5.py
+# 找到 HEAD shard 目录（vkxml_sha 取决于当前 Vulkan-Docs commit）
+$shard = (Get-ChildItem "$env:VKQUERY_CACHE_DIR\tags\HEAD" | Select-Object -First 1).FullName
+
+# 对比 ID 集
+python -c @"
+import json
+r = {k:v for k,v in json.load(open(r'$shard\vuids.json')).items() if v.get('kind')=='implicit'}
+f = {k:v for k,v in json.load(open('tests/fixtures/implicit_vuids_head.json')).items() if v.get('kind')=='implicit'}
+print('only_in_rust:', len(set(r)-set(f)))
+print('only_in_fixture:', len(set(f)-set(r)))
+"@
 ```
+
+非零 diff 通常意味着新的 Vulkan-Docs commit 引入了新规则，或本地改动
+破坏了 implicit VUID 派生逻辑。
 
 ## 七、性能与已知限制
 
@@ -450,16 +461,14 @@ PYTHONPATH=C:\dev\vkquery\src python target/parity_r5.py
 
 - **CPU 嵌入吞吐量低**：Windows 上无 MKL/CUDA 时 BERT 推理 ~32 vec/30s。
   完整 HEAD embedding 约 7 小时。生产场景需要 `--features cuda` /
-  `--features mkl`（当前未启用）。
-- **R5 implicit VUIDs 长尾**：2 条 char-array 静态长度规则未实现
+  `--features mkl`（默认 features 已含 `embed`，但默认走 CPU 后端）。
+- **Implicit VUIDs 长尾**：2 条 char-array 静态长度规则未实现
   （`VkShaderInstrumentationMetricDescriptionARM.name/description`）。
-  其他 ID 完全对齐 Python 参考实现。
-- **文本漂移 7.9%**：implicit VUIDs 文本与 Python 在空格 / "the" /
-  复数等微差异上略有不同。ID 完全一致，下游做精确字符串匹配时才有影响。
-- **R8 未完成**：没有 CI 工作流、跨平台预编译、GitHub Release。
-
-参见 `CLAUDE.md` 与 `tests/fixtures/implicit_vuids_head.json` 获取 parity
-状态详情。
+  此外的 ID 全部派生，等价于 Vulkan-Docs 自身 `validitygenerator.py` 的输出。
+- **预构建 shard 仍需 Vulkan-Docs 克隆**：`vkquery::api::ensure_shard`
+  仍调用 `git rev-parse <tag>` 解析路径，所以即便 shard 已落地缓存，第一次
+  查询仍需要一个本地 Vulkan-Docs 克隆。Shard 节省的是 XML 解析 + 语料
+  构建的开销，不是 git clone 的开销。
 
 ## 八、测试
 
@@ -467,7 +476,7 @@ PYTHONPATH=C:\dev\vkquery\src python target/parity_r5.py
 $env:VKQUERY_CACHE_DIR = "C:\dev\vkquery-rs\target\cache"
 $env:VKQUERY_SKIP_EMBED = "1"
 
-# 全量测试（33 个）
+# 全量测试（32 个：22 lib + 9 integration + 1 BM25 fixture）
 cargo test --features mcp
 
 # 只跑单元测试（22 个，<1s）
@@ -476,10 +485,10 @@ cargo test --features mcp --lib
 # 只跑集成测试
 cargo test --features mcp --test integration
 
-# 只跑 BM25 parity（与 Python top-5 对比）
+# 只跑 BM25 fixture（与 tests/fixtures/bm25_top5_head.json 对比 top-5 命中）
 cargo test --features mcp --test parity_bm25
 
-# 只跑 embedding sanity
+# 只跑 embedding sanity（5 句话余弦相似度自洽）
 cargo test --features mcp --test embeddings_sanity
 ```
 

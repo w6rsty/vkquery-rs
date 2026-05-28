@@ -1,12 +1,12 @@
-//! R6 parity check: Rust BM25 top-5 vs Python BM25 top-5.
+//! BM25 fixture diff: top-5 results vs the snapshot in
+//! `tests/fixtures/bm25_top5_head.json`.
 //!
-//! Loads `tests/fixtures/bm25_top5_head.json` (pre-computed by
-//! `target/dump_bm25_top5.py`) and asserts the two top-5 sets overlap on at
-//! least 2 of 5 hits per canonical query, AND the top-scoring score in the
-//! fixture lies within 5% of Rust's top-1 score. The 2/5 threshold tolerates
-//! BM25 tie-breaking divergence (rank_bm25's numpy argpartition picks
-//! arbitrary ties; Rust sorts by stable corpus index) without losing the
-//! parity-as-smoke-test value.
+//! Asserts that the two top-5 sets overlap on at least 2 of 5 hits per
+//! canonical query, AND that the fixture's top-scoring score lies within
+//! 5% of the current top-1 score. The 2/5 threshold tolerates BM25
+//! tie-breaking divergence on near-tied documents without losing
+//! smoke-test value. Fixture is regenerated with `target/dump_bm25_top5.py`
+//! when corpus content changes.
 
 use std::collections::HashSet;
 use std::path::PathBuf;

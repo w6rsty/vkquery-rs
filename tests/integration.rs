@@ -65,7 +65,7 @@ fn blob_sha_returns_short_sha_format() {
     assert_eq!(sha.len(), 40);
 }
 
-// ---- R2 build-shard end-to-end --------------------------------------------
+// ---- build-shard end-to-end -----------------------------------------------
 
 #[test]
 fn build_shard_end_to_end_head() {
@@ -78,7 +78,7 @@ fn build_shard_end_to_end_head() {
     let cache = vkquery::cache::Cache::new(Some(dir.path().to_path_buf()));
     let shard = vkquery::index::build::build_shard(&source, &cache, "HEAD", true)
         .expect("build_shard HEAD");
-    // The 8 R2-required JSONs should be present.
+    // All XML-derived JSON files should be present.
     for name in &["functions", "structs", "handles", "enums", "extensions", "features", "aliases", "reverse"] {
         let path = shard.json_path(name);
         assert!(path.is_file(), "missing {}.json: {}", name, path.display());
@@ -118,7 +118,7 @@ fn parses_head_vk_xml() {
     assert!(inst.dispatchable);
 
     // vkCmdDraw has the graphics queue and 5 params. The registry stores
-    // the raw `queues=` attribute; xml_index (R2) is what normalizes
+    // the raw `queues=` attribute; xml_index is what normalizes
     // `VK_QUEUE_GRAPHICS_BIT` → `graphics`.
     let draw = reg.commands.get("vkCmdDraw").unwrap();
     assert_eq!(draw.params.len(), 5, "vkCmdDraw should have 5 params, got {}", draw.params.len());

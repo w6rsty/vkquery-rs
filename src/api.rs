@@ -223,7 +223,8 @@ pub fn find_dependencies(name: &str, tag: &str) -> Result<DepGraph> {
     }
 
     // Required features vs. extensions: discriminator is exactly
-    // `startswith("VK_VERSION_")`, matching the Python reference.
+    // `startswith("VK_VERSION_")`. Everything else in `available_in` is
+    // an extension token.
     let required_features: Vec<String> = info
         .available_in
         .iter()

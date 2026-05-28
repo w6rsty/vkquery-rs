@@ -237,10 +237,11 @@ fn build_structs(
         if ty.category != "struct" && ty.category != "union" {
             continue;
         }
-        // Unlike commands, the Python reference does NOT expand aliased
-        // structs — Python's reg.py only resolves command aliases at load
-        // time. So we use this type's own members verbatim; aliased struct
-        // entries end up with `members: []` exactly like Python.
+        // Unlike commands, we do NOT expand aliased structs here — we use
+        // this type's own members verbatim. Aliased struct entries
+        // therefore end up with `members: []`; the API layer
+        // (`api::get_struct`) resolves the alias and re-reads the
+        // canonical struct's data on the way out.
         let (feature_origin, available_in) = origin_to_pair(&origin.types, name);
         let members: Vec<Value> = ty.members.iter().map(member_to_value).collect();
         let aliases = aliases_back.get(name).cloned().unwrap_or_default();

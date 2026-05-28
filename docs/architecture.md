@@ -27,16 +27,15 @@ Vulkan-Docs 克隆、按需读 git tag 上的快照。这样：
 - 不会落后于 tag。
 - 用户可以用 `VKQUERY_DOCS_PATH` 把克隆指到一个固定 commit。
 
-### 2. 纯 Rust 重写 reg.py，遗留 schema 单点修复
+### 2. 纯 Rust vk.xml 解析，遗留 schema 单点修复
 
-Python 参考实现用 Vulkan-Docs 自带的 `scripts/reg.py` 解析 vk.xml；
-Rust 版改用 `roxmltree`-based 纯 Rust 解析器，源码在
-`src/registry/parse.rs`。理由：
+`src/registry/parse.rs` 用 `roxmltree` 做纯 Rust XML 解析，不依赖
+Vulkan-Docs 自带的 `scripts/reg.py`。理由：
 
-- Python 端做不到「单二进制零依赖」的目标。
-- vk.xml 的 schema 结构十年来变化不算激烈，重写后只需要在
-  `src/registry/legacy.rs` 的 `repair()` 函数里集中处理已知遗留
-  schema（例如 v1.3.x 及更早 funcpointer 的 `<name>` 元素位置不同），
+- 「单二进制零依赖」的目标要求查询路径上没有 Python / Ruby。
+- vk.xml 的 schema 结构十年来变化不算激烈，集中在
+  `src/registry/legacy.rs::repair()` 处理已知遗留 schema
+  （例如 v1.3.x 及更早 funcpointer 的 `<name>` 元素位置不同），
   其他部分 schema-agnostic。
 
 代价：要持续跟踪上游对 vk.xml 的非破坏性扩展。每一处 `legacy::repair()`
@@ -82,19 +81,16 @@ Vulkan-Docs spec build 跑 asciidoctor + Ruby 扩展
 - **Explicit VUIDs**——`src/index/vuid_explicit.rs` 用 regex 扫
   `chapters/*.adoc`，维护一个 `ifdef::EXT[]` 栈，所以每个 VUID 都带
   上守卫扩展集合。`include::{chapters}/commonvalidity/<file>.adoc[]`
-  递归展开，把外层 refpage 的实体名替换进 `{refpage}` 占位符。**与
-  Python 参考实现 100% id / 100% text 对齐**（19,833 条）。
+  递归展开，把外层 refpage 的实体名替换进 `{refpage}` 占位符。覆盖
+  HEAD 上全部 19,833 条 VUID。
 - **Implicit VUIDs**——`src/index/vuid_implicit.rs` 从 vk.xml 的属性
-  纯 Rust 重导出 `ValidityOutputGenerator` 的规则。**与 Python 99.97%
-  recall / 100.00% precision**（6573/6575 IDs；缺的 2 条是
-  `VkShaderInstrumentationMetricDescriptionARM` 的 char[N] 静态数组
-  文本）。
+  纯 Rust 重导出 `ValidityOutputGenerator` 的规则。覆盖 6,575 条 ID
+  中的 6,573；缺的 2 条是 `VkShaderInstrumentationMetricDescriptionARM`
+  的 char[N] 静态数组文本（待补）。
 
-Python 端依赖上游 generator 的内部契约——上游若改 `writeInclude` 的
-形状，Python 端会显式坏掉。Rust 端没有这个 contract，但要付出一次性
-的端到端 parity 校对成本。fixture 在
-`tests/fixtures/implicit_vuids_head.json`，比对脚本是
-`target/parity_r5.py`（在 gitignore 下，本地开发用）。
+代价：要持续跟踪上游 generator 的内部契约——上游若改规则的写法，
+我们的 derivation 会偏离。校对方式是把派生结果 diff 到 fixture
+`tests/fixtures/implicit_vuids_head.json`（流程见 usage.md 6.4）。
 
 ### 6. 反向索引一次 XML 扫描产出
 
@@ -124,9 +120,10 @@ Python 端依赖上游 generator 的内部契约——上游若改 `writeInclude
 
 `search_concept` 三种模式：
 
-- **`bm25`**——`src/search/bm25.rs` 是 Okapi BM25 的纯 Rust 重实现
-  （k1=1.5, b=0.75, eps=0.25，与 Python 的 `rank_bm25.BM25Okapi` 完全
-  一致）。tokenizer 是 3 变体：原始 + 小写 + CamelCase 拆分，所以
+- **`bm25`**——`src/search/bm25.rs` 是 Okapi BM25 的纯 Rust 实现
+  （k1=1.5, b=0.75, eps=0.25，参数与 `rank_bm25.BM25Okapi` 默认一致，
+  便于复现常规论文/教程里的 baseline）。tokenizer 是 3 变体：原始 +
+  小写 + CamelCase 拆分，所以
   `"image create info"` 能匹配 `"VkImageCreateInfo"`。语料 = 章节
   prose + VUID 文本。无任何外部依赖。
 - **`embed`**——`src/search/embedding.rs` 用 candle 0.8 + bge-small-en-v1.5

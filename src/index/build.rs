@@ -1,8 +1,10 @@
 //! Orchestrator: ensure shard fresh, load vk.xml at the requested tag,
 //! parse it, build every entity index, and write the shard.
 //!
-//! Currently builds only the XML-derived indices (R2). VUIDs (R4-5) and
-//! BM25/embeddings (R6-7) extend this.
+//! End-to-end pipeline: XML indices (functions / structs / handles /
+//! enums / extensions / features / aliases / reverse) → explicit +
+//! implicit VUIDs → BM25 corpus → optional BERT embeddings (gated by
+//! `embed` feature and `VKQUERY_SKIP_EMBED`).
 
 use anyhow::{Context, Result};
 

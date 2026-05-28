@@ -1,8 +1,6 @@
-//! Embedding self-consistency parity test (R7).
+//! Embedding self-consistency sanity test.
 //!
-//! Not a full parity test against `sentence-transformers` (would need
-//! Python + the model in CI). Instead, verifies that our candle BERT
-//! pipeline produces sensible vectors:
+//! Verifies that the candle BERT pipeline produces sensible vectors:
 //! - L2 norm of every output is ≈ 1.0
 //! - cos(text, text) ≈ 1.0 (the encoder is deterministic)
 //! - cos(near-duplicate pair) > cos(unrelated pair) by a wide margin

@@ -141,10 +141,10 @@ candle 的 backend 选择在编译期完成，无法运行时切换。错误信�
 
 裸 `--features embed` 走纯 Rust CPU，最慢但所有平台都行。
 
-## 「No module / library found」类错误
+## 运行时 dynamic-library load 错误
 
-Rust 端没有 Python 那种运行时模块查找，绝大多数缺依赖会在编译时报错。
-如果你看到运行时 dynamic-library load 错误，通常是：
+绝大多数依赖问题会在编译时报错。如果你看到 *运行时* 加载动态库失败
+（typically `error while loading shared libraries: libfoo.so.X`），通常是：
 
 - **CUDA Toolkit 没装或 PATH 没设**（`cuda` feature）——
   Linux 上 `nvidia-smi` 能跑，但 `nvcc --version` 报 not found，说明

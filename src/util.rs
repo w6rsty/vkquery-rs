@@ -101,10 +101,9 @@ mod tests {
 
     #[test]
     fn normalize_strips_const_and_pointer() {
-        // Mirror Python's `_PTR_RE` (trailing `*+`) + `_CONST_RE` (leading
-        // `const `) loop. `_CONST_RE` only strips the *leading* `const`, so
-        // pointer-to-const-pointer leaves a trailing ` const` behind — same
-        // behavior as the Python reference.
+        // Strip trailing `*+` and a single leading `const ` only. Inner
+        // `const` (e.g. `pointer-to-const-pointer`) is preserved so type
+        // identity remains distinct from the unqualified form.
         assert_eq!(normalize_type("const VkImage*"), "VkImage");
         assert_eq!(normalize_type("VkImage *"), "VkImage");
         assert_eq!(normalize_type("const char* const*"), "char* const");

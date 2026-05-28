@@ -135,17 +135,17 @@ worked example：加 Tantivy。
 ## Rust 特有的 pitfalls（前辈踩过）
 
 - **`serde_json::Map` 默认是 BTreeMap-backed**——`json!({...})` 的字段
-  顺序按字面量出现顺序写入，但序列化时 key 按字母排序（与 Python 的
-  `json.dumps(..., sort_keys=True)` 一致）。如果你用 `#[derive(Serialize)]`，
-  字段顺序变成 struct 定义顺序，跟 Python 的 sort_keys 输出可能不同——
-  尤其在 shard JSON 写入路径上，**手动确保字段按字母序声明**，或者
-  转走 `json!` 宏。
+  顺序按字面量出现顺序写入，但序列化时 key 按字母排序。如果你用
+  `#[derive(Serialize)]`，字段顺序变成 struct 定义顺序，可能不是字母
+  序——尤其在 shard JSON 写入路径上（cache 是 content-addressed，要保
+  证字节稳定），**手动确保字段按字母序声明**，或者转走 `json!` 宏。
 - **`half::bf16: SampleUniform` 冲突**——candle 0.7 与 `rand 0.9` 联合
   使用时报这个 trait bound 错误。已升级到 candle 0.8 解决；保留这条
   以防回归。
 - **`opt-level = "z"` 让 BERT 推理变成 60s/batch**——`Cargo.toml`
   `[profile.release]` 用 `opt-level = 3`（不是 size），LTO + strip 后
-  二进制仍然 ~6MB。不要为了体积切回 `"z"`。
+  二进制仍然 ~3.7MB（slim）/ ~13MB（默认含 embed）。不要为了体积切回
+  `"z"`。
 - **Windows path separator**——代码统一用 `PathBuf::join`；不要在
   字符串里硬拼 `/` 或 `\`。`Cache::shard_dir(tag, vkxml_sha)` 已经处理
   了 tag 名里 `/`（如 `release/v1.4.x`）的转义。
