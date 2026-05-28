@@ -1,0 +1,113 @@
+{
+  "image layout transition": [
+    {
+      "kind": "section",
+      "section_anchor": "synchronization-image-layout-transitions",
+      "entity_hint": null,
+      "source_file": "chapters/synchronization.adoc",
+      "score": 38.6893
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "vkTransitionImageLayout",
+      "source_file": "generated/validity/protos/vkTransitionImageLayout.adoc",
+      "score": 38.6524
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "vkTransitionImageLayoutEXT",
+      "source_file": "generated/validity/protos/vkTransitionImageLayoutEXT.adoc",
+      "score": 38.6524
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "VkImageMemoryBarrier2",
+      "source_file": "chapters/synchronization.adoc",
+      "score": 36.054
+    },
+    {
+      "kind": "section",
+      "section_anchor": "synchronization-image-memory-barriers",
+      "entity_hint": "VkImageMemoryBarrier2",
+      "source_file": "chapters/synchronization.adoc",
+      "score": 35.402
+    }
+  ],
+  "descriptor set layout": [
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "VkDataGraphPipelineCreateInfoARM",
+      "source_file": "chapters/VK_ARM_data_graph/graphs.adoc",
+      "score": 31.512
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "vkDestroyDescriptorSetLayout",
+      "source_file": "generated/validity/protos/vkDestroyDescriptorSetLayout.adoc",
+      "score": 30.9579
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "vkCmdPushDescriptorSet",
+      "source_file": "chapters/commonvalidity/push_descriptor_set_common.adoc",
+      "score": 30.4918
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "VkPushDescriptorSetInfo",
+      "source_file": "chapters/commonvalidity/push_descriptor_set_common.adoc",
+      "score": 30.4918
+    },
+    {
+      "kind": "section",
+      "section_anchor": "descriptors-sets",
+      "entity_hint": null,
+      "source_file": "chapters/descriptorsets.adoc",
+      "score": 30.4888
+    }
+  ],
+  "graphics pipeline creation": [
+    {
+      "kind": "section",
+      "section_anchor": "pipelines-creation-feedback",
+      "entity_hint": "VkPipelineCreationFeedbackCreateInfo",
+      "source_file": "chapters/pipelines.adoc",
+      "score": 27.7684
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "VkPipelineCreationFeedbackCreateInfo",
+      "source_file": "generated/validity/structs/VkPipelineCreationFeedbackCreateInfo.adoc",
+      "score": 26.1374
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "VkRayTracingShaderGroupCreateInfoKHR",
+      "source_file": "chapters/pipelines.adoc",
+      "score": 24.7289
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "VkComputePipelineIndirectBufferInfoNV",
+      "source_file": "chapters/pipelines.adoc",
+      "score": 24.3312
+    },
+    {
+      "kind": "vuid",
+      "section_anchor": null,
+      "entity_hint": "VkComputePipelineCreateInfo",
+      "source_file": "chapters/pipelines.adoc",
+      "score": 24.2311
+    }
+  ]
+}

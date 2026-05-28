@@ -1,0 +1,76 @@
+[package]
+name = "vkquery"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Query/retrieval layer over Khronos Vulkan-Docs."
+license = "Apache-2.0"
+repository = "https://github.com/w6rsty/vkquery-rs"
+
+[[bin]]
+name = "vkquery"
+path = "src/main.rs"
+
+[lib]
+name = "vkquery"
+path = "src/lib.rs"
+
+[features]
+default = ["mcp", "embed"]
+embed = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:ureq", "dep:ndarray", "dep:serde_bytes"]
+mcp = ["dep:rmcp"]
+
+[dependencies]
+# XML
+roxmltree = "0.20"
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# CLI
+clap = { version = "4", features = ["derive"] }
+# Async runtime (needed by rmcp)
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "io-std", "process"] }
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Errors
+thiserror = "1"
+anyhow = "1"
+# Regex (asciidoc extraction)
+regex = "1"
+# Hashing for cache keys
+sha2 = "0.10"
+hex = "0.4"
+# Filesystem
+dirs = "5"
+
+# --- Optional, feature-gated -------------------------------------------------
+# MCP server
+rmcp = { version = "0.2", features = ["server", "transport-io"], optional = true }
+# Numerical (vector search; small)
+ndarray = { version = "0.16", optional = true }
+# ML inference (candle pure-Rust; bumped from 0.7 to 0.8 to clear the
+# `half::bf16: SampleUniform` conflict with `rand 0.9`).
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
+tokenizers = { version = "0.20", default-features = false, features = ["onig"], optional = true }
+# Direct HTTP downloads — hf-hub 0.3 hit a "RelativeUrlWithoutBase" bug on
+# Windows redirect handling, so we just fetch the 3 model files ourselves.
+ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
+serde_bytes = { version = "0.11", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "1"
+tempfile = "3"
+
+[profile.release]
+# `opt-level = "z"` shaved ~5MB off binary size but made BERT inference
+# unusably slow (~60s/batch on CPU vs <2s with O3). Switched to `3` so
+# embedding builds finish in reasonable time; the binary is still ~6MB
+# stripped with LTO.
+lto = "fat"
+codegen-units = 1
+strip = true
+opt-level = 3
+panic = "abort"
