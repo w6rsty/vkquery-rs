@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same ref when a newer commit lands.
+# `parity_bm25.rs` is slow (~5 min cold on a Windows runner), so this
+# saves ~15 minutes of runner time per rapid-fire push.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Tests need a Vulkan-Docs clone but never an embedding index — the
+  # embedding model is 130MB and inference is slow on CI hardware. Skip
+  # at shard-build time; BM25 corpus + parity test still run.
+  VKQUERY_SKIP_EMBED: "1"
+  # Free regression check — promotes unused / dead_code / etc. to errors
+  # across the matrix without adding a separate clippy run.
+  RUSTFLAGS: "-D warnings"
+  # Trim incremental compile artifacts on CI; we never reuse them across
+  # workflow runs anyway, and they bloat the cache.
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # ---- Main matrix: build + test on 3 OS, mcp feature only --------------
+  test:
+    name: test-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout vkquery-rs
+        uses: actions/checkout@v4
+
+      - name: Clone Vulkan-Docs (shallow, blobless)
+        # Integration + parity tests look up the sibling `../Vulkan-Docs`
+        # via `vulkan_docs_path()` (tests/integration.rs:9). Shallow +
+        # blob-filtered keeps the clone <50MB; cat-file --batch fetches
+        # blobs on demand (same pattern as src/docs_source.rs in prod).
+        # The two backwards-compat tests (`parses_v1_3_250_vk_xml`,
+        # `parses_v1_0_40_core_vk_xml`) self-skip when those tags aren't
+        # local — that's intentional, full history isn't worth ~200MB.
+        shell: bash
+        run: |
+          git clone --depth=1 --filter=blob:none \
+            https://github.com/KhronosGroup/Vulkan-Docs.git \
+            ../Vulkan-Docs
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Split caches per OS — different toolchains, different artifacts.
+          shared-key: test-${{ matrix.os }}
+
+      - name: Build (mcp only, no embed)
+        run: cargo build --release --no-default-features --features mcp
+
+      - name: Test
+        # dev profile compiles ~5x faster than release; the slow test
+        # (`parity_bm25.rs`, full HEAD shard build) is I/O-bound on git
+        # cat-file, not CPU. Net wall-time is better with dev here.
+        run: cargo test --no-default-features --features mcp -- --nocapture
+
+      - name: Report binary size
+        # Informational only — runners differ enough that asserting a
+        # threshold would be flaky. Windows produces vkquery.exe; the glob
+        # covers both.
+        shell: bash
+        run: ls -lh target/release/vkquery*
+
+  # ---- Build-only embed job on Linux ------------------------------------
+  # Catches `--features embed` compile failures (candle bumps, tokenizers
+  # API drift, ndarray conflicts) without paying for the 130MB model
+  # download or CPU BERT inference. The model is only fetched at runtime
+  # in src/index/build.rs, never at compile.
+  build-embed:
+    name: build-embed-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build-embed-linux
+      - name: cargo build --features embed
+        run: cargo build --release --features embed

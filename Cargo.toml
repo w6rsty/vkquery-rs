@@ -19,6 +19,22 @@ path = "src/lib.rs"
 default = ["mcp", "embed"]
 embed = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:ureq", "dep:ndarray", "dep:serde_bytes"]
 mcp = ["dep:rmcp"]
+# GPU / SIMD acceleration for the embedding model. Each implies `embed`.
+# These are MUTUALLY EXCLUSIVE — enabling more than one (e.g.
+# `--features "cuda mkl"`) will fail at the candle build step. Pick the
+# backend that matches your hardware:
+#   cuda       — NVIDIA GPU (Linux / Windows, needs CUDA Toolkit ≥ 12)
+#   cudnn      — implies cuda; adds cuDNN kernels (better perf)
+#   mkl        — Intel CPU with Intel oneAPI (Linux / Windows)
+#   accelerate — Apple Accelerate framework (macOS only)
+#   metal      — Apple GPU via Metal (macOS only)
+# candle-nn does not expose a `cudnn` feature in 0.8 — that path stays
+# on candle-core alone.
+cuda       = ["embed", "candle-core/cuda",       "candle-nn/cuda",       "candle-transformers/cuda"]
+cudnn      = ["cuda",  "candle-core/cudnn"]
+mkl        = ["embed", "candle-core/mkl",        "candle-nn/mkl",        "candle-transformers/mkl"]
+accelerate = ["embed", "candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
+metal      = ["embed", "candle-core/metal",      "candle-nn/metal",      "candle-transformers/metal"]
 
 [dependencies]
 # XML

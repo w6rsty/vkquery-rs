@@ -49,6 +49,31 @@ on Windows or `$XDG_CACHE_HOME/vkquery/Vulkan-Docs/` elsewhere). Override the
 clone location with `VKQUERY_DOCS_PATH=<path>`. Override the cache with
 `VKQUERY_CACHE_DIR=<path>`.
 
+## GPU acceleration
+
+CPU BERT inference on Windows without MKL clocks ~32 vec/30s, so a full HEAD
+embed (~27K texts) takes ~7h. For production use, build with one of these
+mutually-exclusive cargo features — each one implies `embed`, so you do
+**not** also need to pass `--features embed`:
+
+| Feature | Backend | Platform | Notes |
+|---|---|---|---|
+| `cuda` | NVIDIA CUDA | Linux / Windows | Needs CUDA Toolkit ≥ 12 on `PATH` |
+| `cudnn` | CUDA + cuDNN | Linux / Windows | Implies `cuda`; needs cuDNN libs on `PATH` |
+| `mkl` | Intel MKL | Linux / Windows (x86_64) | Needs Intel oneAPI; `LD_LIBRARY_PATH` / `PATH` set |
+| `accelerate` | Apple Accelerate | macOS | No setup needed |
+| `metal` | Apple GPU | macOS | No setup needed |
+
+```bash
+cargo build --release --features cuda                 # CUDA only (also pulls embed)
+cargo build --release --features cudnn                # cuDNN (transitively cuda + embed)
+cargo build --release --features mkl                  # Intel MKL on Linux/Windows
+cargo build --release --features metal                # macOS GPU
+```
+
+**Don't combine backends.** Enabling more than one (`--features "cuda mkl"`)
+will fail at candle's build step with an unfriendly error. Pick one.
+
 ## Examples
 
 ```bash
