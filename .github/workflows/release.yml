@@ -72,7 +72,9 @@ jobs:
           cp target/${{ matrix.target }}/release/vkquery "$STAGE/"
           cp README.md "$STAGE/"
           tar -czf "$STAGE.tar.gz" "$STAGE"
-          sha256sum "$STAGE.tar.gz" | awk '{print $1}' > "$STAGE.tar.gz.sha256"
+          # macOS runners don't ship `sha256sum` (coreutils); use `shasum -a 256`,
+          # which is preinstalled on both ubuntu-latest (Perl) and macos-14.
+          shasum -a 256 "$STAGE.tar.gz" | awk '{print $1}' > "$STAGE.tar.gz.sha256"
 
       - name: Archive (zip, windows)
         if: matrix.archive == 'zip'
