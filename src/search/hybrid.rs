@@ -7,7 +7,17 @@ use std::collections::HashMap;
 
 use crate::types::SearchHit;
 
-const RRF_CONSTANT: f32 = 60.0;
+/// RRF damping constant. Defaults to 60.0 (the value from the original RRF
+/// paper, matching Python `vkquery.api._fuse_rrf`). Override via
+/// `VKQUERY_HYBRID_RRF_K=<positive f32>` to experiment with rank fusion
+/// weighting; smaller values push top-of-list items further apart.
+fn rrf_constant() -> f32 {
+    std::env::var("VKQUERY_HYBRID_RRF_K")
+        .ok()
+        .and_then(|s| s.parse::<f32>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(60.0)
+}
 
 type DedupKey = (String, String, String, String);
 
@@ -34,18 +44,19 @@ fn key(hit: &SearchHit) -> DedupKey {
 /// hits, with the new `score` set to the fused RRF value and the
 /// representative hit picked from whichever list saw it first.
 pub fn rrf(bm25: &[SearchHit], embed: &[SearchHit], k: usize) -> Vec<SearchHit> {
+    let c = rrf_constant();
     let mut scores: HashMap<DedupKey, f32> = HashMap::new();
     let mut rep: HashMap<DedupKey, SearchHit> = HashMap::new();
 
     for (rank, hit) in bm25.iter().enumerate() {
         let k_ = key(hit);
-        let s = 1.0 / (RRF_CONSTANT + rank as f32 + 1.0);
+        let s = 1.0 / (c + rank as f32 + 1.0);
         *scores.entry(k_.clone()).or_insert(0.0) += s;
         rep.entry(k_).or_insert_with(|| hit.clone());
     }
     for (rank, hit) in embed.iter().enumerate() {
         let k_ = key(hit);
-        let s = 1.0 / (RRF_CONSTANT + rank as f32 + 1.0);
+        let s = 1.0 / (c + rank as f32 + 1.0);
         *scores.entry(k_.clone()).or_insert(0.0) += s;
         rep.entry(k_).or_insert_with(|| hit.clone());
     }

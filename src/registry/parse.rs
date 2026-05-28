@@ -184,6 +184,18 @@ fn parse_param(p: Node, is_member: bool) -> Member {
         .map(crate::util::normalize_type)
         .unwrap_or_default();
     let name = child(p, "name").and_then(|t| t.text()).unwrap_or("").trim().to_string();
+    // Static-array size lives in `name[SIZE]` text, where SIZE is either a
+    // numeric literal or an enum name wrapped in `<enum>`. `inner_text`
+    // collapses those into bare `[VK_MAX_DESCRIPTION_SIZE]` / `[4]`. Only
+    // fixed-size arrays (pointer_depth=0) have this — pointer arrays use
+    // `len=`.
+    let static_array_size = if pointer_depth == 0 {
+        static ARRAY_SIZE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let re = ARRAY_SIZE_RE.get_or_init(|| regex::Regex::new(r"\[([A-Za-z0-9_]+)\]").unwrap());
+        re.captures(&raw).map(|c| c[1].to_string())
+    } else {
+        None
+    };
     Member {
         name,
         ty: ty_text,
@@ -197,6 +209,7 @@ fn parse_param(p: Node, is_member: bool) -> Member {
         is_const,
         pointer_depth,
         raw_decl: raw,
+        static_array_size,
     }
 }
 

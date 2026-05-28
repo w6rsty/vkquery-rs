@@ -5,7 +5,7 @@
 具体使用方法。
 
 > 当前状态：R0–R7 全部完成；R5 implicit VUIDs 与 Python 参考实现的 ID
-> 一致率 99.97% / 准确率 100.00%；R6 BM25 通过形式化 parity 测试。
+> 一致率 100.00% / 准确率 100.00%（6575/6575）；R6 BM25 通过形式化 parity 测试。
 > 共 33 个测试通过（`cargo test --features mcp`）。
 
 ## 一、构建与安装
@@ -42,6 +42,14 @@ cargo install --path C:\dev\vkquery-rs
 cargo install --path C:\dev\vkquery-rs --features mcp --no-default-features
 ```
 
+### 1.3 直接下载预编译二进制
+
+每个 `v*` tag 会触发 `.github/workflows/release.yml` 在三个平台
+（`x86_64-unknown-linux-gnu`、`aarch64-apple-darwin`、`x86_64-pc-windows-msvc`）
+构建仅含 `mcp` 特性的精简二进制（约 2.5MB），并连同 SHA256 校验上传到
+[GitHub Releases](https://github.com/w6rsty/vkquery-rs/releases)。需要 GPU
+后端（`cuda` / `metal` / `mkl`）的用户仍需自己 `cargo install` 从源码编译。
+
 ## 二、配置
 
 ### 2.1 环境变量
@@ -52,6 +60,7 @@ cargo install --path C:\dev\vkquery-rs --features mcp --no-default-features
 | `VKQUERY_CACHE_DIR` | `%LOCALAPPDATA%\vkquery`（Win）/ `~/.cache/vkquery`（其他） | shard 缓存位置 |
 | `VKQUERY_SKIP_EMBED` | （未设） | 设为 `1` 时跳过 embedding 索引构建（BM25 仍建） |
 | `VKQUERY_EMBED_LIMIT` | （未设） | 限制 embedding 语料的前 N 条，开发用 |
+| `VKQUERY_HYBRID_RRF_K` | `60` | hybrid 搜索的 RRF 阻尼常数；较小值放大 top-rank 差距，用于调参实验 |
 
 ### 2.2 首次运行行为
 

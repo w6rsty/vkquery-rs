@@ -34,7 +34,10 @@ cargo install --path . --features mcp        # without embed (~2.5MB skinny buil
 cargo install --path . --no-default-features # library / CLI only, no MCP, no embed
 ```
 
-Or grab the prebuilt binary from a release (eventually). For development:
+Or grab the prebuilt `mcp`-only binary for your platform from
+[GitHub Releases](https://github.com/w6rsty/vkquery-rs/releases) (Linux x86-64,
+macOS arm64, Windows x86-64; GPU backends still need `cargo install` from
+source). For development:
 
 ```bash
 cargo build --release --features embed,mcp
@@ -108,7 +111,7 @@ client to launch `vkquery mcp` as the command.
 |---|---|
 | functions / structs / handles / enums / extensions / features / aliases | 100% id, 99.4% byte |
 | explicit VUIDs | 100% id, 100% text (19,833 entries) |
-| implicit VUIDs | **99.97% recall, 100.00% precision** (6573/6575); 92.1% text |
+| implicit VUIDs | **100.00% recall, 100.00% precision** (6575/6575); 92.1% text |
 | BM25 search | parity test `tests/parity_bm25.rs` passes (≥2/5 overlap + ≤5% top-1 score drift) |
 | semantic embeddings (`--mode embed`) | candle 0.8 + bge-small-en-v1.5; 5-sentence sanity ✓ |
 | hybrid search (`--mode hybrid`) | RRF fusion of bm25 + embed lists ✓ |
@@ -123,11 +126,8 @@ see [docs/usage.md](docs/usage.md).
   `VKQUERY_EMBED_LIMIT=N` to cap the corpus, or `VKQUERY_SKIP_EMBED=1`
   to skip embeddings during shard build (BM25 still indexes). Production
   needs `--features cuda` / `--features mkl` (not enabled by default).
-- **R5 implicit VUIDs**: 2 IDs missing total —
-  `VkShaderInstrumentationMetricDescriptionARM.name` and `.description`
-  (char[VK_MAX_DESCRIPTION_SIZE] static-array text). No other Vulkan struct
-  uses this pattern. 7.9% text drift on the 6,573 common VUIDs is
-  whitespace/markup micro-differences.
+- **R5 implicit VUIDs text drift**: 7.9% of the 6,575 common VUIDs differ from
+  Python by whitespace / asciidoc markup micro-differences. IDs match exactly.
 
 ## License
 

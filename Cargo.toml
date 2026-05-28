@@ -6,6 +6,10 @@ rust-version = "1.75"
 description = "Query/retrieval layer over Khronos Vulkan-Docs."
 license = "Apache-2.0"
 repository = "https://github.com/w6rsty/vkquery-rs"
+homepage = "https://github.com/w6rsty/vkquery-rs"
+readme = "README.md"
+keywords = ["vulkan", "khronos", "spec", "mcp", "vuid"]
+categories = ["development-tools", "command-line-utilities"]
 
 [[bin]]
 name = "vkquery"

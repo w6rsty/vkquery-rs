@@ -75,6 +75,12 @@ pub struct Member {
     pub is_const: bool,
     pub pointer_depth: i32,
     pub raw_decl: String,
+    /// C static-array size for fixed-size array members (e.g.
+    /// `char name[VK_MAX_DESCRIPTION_SIZE]` → `Some("VK_MAX_DESCRIPTION_SIZE")`).
+    /// `None` for scalar / pointer / dynamic-len members. Captured from
+    /// `raw_decl` since `vk.xml` puts the size in `[…]` text (often wrapped
+    /// in `<enum>`), not in a discrete attribute.
+    pub static_array_size: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -1021,7 +1021,21 @@ fn emit_member_validity(
             let text = format!("{prefix}{mname} must: be a valid {} value", m.ty);
             emit(out, entity, mname, "parameter", &text, source_file);
         }
-        _ => {}
+        _ => {
+            // Static-array char member (e.g. `char name[VK_MAX_DESCRIPTION_SIZE]`).
+            // `cat` is empty because `char` isn't a registered Vulkan type.
+            // Python's validitygenerator treats `len="null-terminated"` on a
+            // char[N] as a bounded UTF-8 string; the array's enum/literal
+            // size becomes the upper bound.
+            if let (Some(size), "char") = (m.static_array_size.as_deref(), m.ty.as_str()) {
+                if m.len.as_deref() == Some("null-terminated") {
+                    let text = format!(
+                        "{mname} must: be a null-terminated UTF-8 string whose length is less than or equal to {size}"
+                    );
+                    emit(out, entity, mname, "parameter", &text, source_file);
+                }
+            }
+        }
     }
 }
 

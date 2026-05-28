@@ -1,0 +1,119 @@
+name: release
+
+# Builds a small `--features mcp` (no embed) binary on three OSes and uploads
+# the archives + sha256 checksums to a GitHub Release when a `v*` tag lands.
+# GPU/MKL backends are intentionally NOT in the published matrix yet — they
+# require external toolchains (CUDA Toolkit, Intel oneAPI, …) on the runner
+# and a separate distribution strategy. Users who want GPU acceleration run
+# `cargo install --path . --features cuda|metal|mkl` themselves.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # softprops/action-gh-release needs this to upload assets.
+
+jobs:
+  build:
+    name: build-${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      # One platform failure shouldn't block the others — partial releases
+      # are still useful and the user can re-run a single target.
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --no-default-features --features mcp --target ${{ matrix.target }}
+
+      # ---- Package archive ------------------------------------------------
+      # Naming: vkquery-<tag-or-shortsha>-<target>.<ext>
+      - name: Derive version tag
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          STAGE=vkquery-${{ steps.ver.outputs.tag }}-${{ matrix.target }}
+          mkdir -p "$STAGE"
+          cp target/${{ matrix.target }}/release/vkquery "$STAGE/"
+          cp README.md "$STAGE/"
+          tar -czf "$STAGE.tar.gz" "$STAGE"
+          sha256sum "$STAGE.tar.gz" | awk '{print $1}' > "$STAGE.tar.gz.sha256"
+
+      - name: Archive (zip, windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $stage = "vkquery-${{ steps.ver.outputs.tag }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/vkquery.exe" $stage
+          Copy-Item "README.md" $stage
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+          (Get-FileHash "$stage.zip" -Algorithm SHA256).Hash.ToLower() | Out-File -Encoding ascii "$stage.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vkquery-${{ steps.ver.outputs.tag }}-${{ matrix.target }}
+          path: |
+            vkquery-${{ steps.ver.outputs.tag }}-${{ matrix.target }}.tar.gz
+            vkquery-${{ steps.ver.outputs.tag }}-${{ matrix.target }}.tar.gz.sha256
+            vkquery-${{ steps.ver.outputs.tag }}-${{ matrix.target }}.zip
+            vkquery-${{ steps.ver.outputs.tag }}-${{ matrix.target }}.zip.sha256
+          if-no-files-found: ignore
+
+  # Only assemble a Release on tag pushes — workflow_dispatch is for
+  # validating the build matrix without publishing.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show staged files
+        run: ls -lh dist
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

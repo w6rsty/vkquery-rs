@@ -8,8 +8,10 @@
 //!     meta.jsonl         # one EmbedDoc per row
 //!     model.txt          # model id string
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{anyhow, Context, Result};
 use candle_core::{DType, Device, Tensor};
@@ -106,7 +108,7 @@ pub fn index_usable(emb_dir: &Path) -> bool {
 /// don't use in hot paths.
 pub fn encode_texts(model_id: Option<&str>, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
     let id = model_id.map(String::from).unwrap_or_else(resolved_model);
-    let loaded = load_model(&id)?;
+    let loaded = cached_load_model(&id)?;
     encode_batch(&loaded, texts)
 }
 
@@ -177,6 +179,22 @@ fn load_model(model_id: &str) -> Result<LoadedModel> {
     };
     let model = BertModel::load(vb, &config).context("BertModel::load")?;
     Ok(LoadedModel { model, tokenizer, device, hidden_size })
+}
+
+/// Process-wide cache of loaded BERT models. `pick_device()` is deterministic
+/// for a given process (env vars + feature flags), so the model id alone is
+/// a sufficient cache key — there is only one device per process. CLI usage
+/// pays the load cost once instead of per-query (~1–3s saved per MCP call).
+static MODEL_CACHE: OnceLock<Mutex<HashMap<String, Arc<LoadedModel>>>> = OnceLock::new();
+
+fn cached_load_model(model_id: &str) -> Result<Arc<LoadedModel>> {
+    let cache = MODEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(m) = cache.lock().unwrap().get(model_id) {
+        return Ok(m.clone());
+    }
+    let loaded = Arc::new(load_model(model_id)?);
+    cache.lock().unwrap().insert(model_id.to_string(), loaded.clone());
+    Ok(loaded)
 }
 
 /// Tokenize → forward → CLS pool → L2-normalize a batch of texts.
@@ -254,7 +272,7 @@ pub fn build_index(
     model_id: Option<&str>,
 ) -> Result<(usize, usize, String)> {
     let model_id = model_id.map(String::from).unwrap_or_else(resolved_model);
-    let loaded = load_model(&model_id)?;
+    let loaded = cached_load_model(&model_id)?;
     let dim = loaded.hidden_size;
 
     let mut docs: Vec<EmbedDoc> = Vec::new();
@@ -350,15 +368,16 @@ pub fn build_index(
     Ok((written, dim, model_id))
 }
 
-/// Search a single shard's embedding index. Re-loads the model on every call
-/// (fine for CLI; library users with hot paths should reuse `load_model`).
+/// Search a single shard's embedding index. The underlying BERT model is
+/// process-cached by `cached_load_model`, so repeated queries within the same
+/// process (CLI loop, MCP session) skip the ~1–3s reload cost.
 pub fn search_shard(emb_dir: &Path, query: &str, k: usize) -> Result<Vec<SearchHit>> {
     let model_path = emb_dir.join("model.txt");
     let model_id = std::fs::read_to_string(&model_path)
         .with_context(|| format!("read {}", model_path.display()))?
         .trim()
         .to_string();
-    let loaded = load_model(&model_id)?;
+    let loaded = cached_load_model(&model_id)?;
     let dim = loaded.hidden_size;
 
     let meta_path = emb_dir.join("meta.jsonl");

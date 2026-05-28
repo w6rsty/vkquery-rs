@@ -105,7 +105,7 @@ docs/
 |---|---|---|
 | R0–R3 | ✓ | scaffold, registry parser, XML index + 5 queries, tag/diff |
 | R4 explicit VUIDs | ✓ | 100% id, 100% text vs Python |
-| R5 implicit VUIDs | ✓ (99.97% recall / 100.00% precision) | only 2 IDs missing — char[N] static-array text in `VkShaderInstrumentationMetricDescriptionARM` |
+| R5 implicit VUIDs | ✓ (100.00% recall / 100.00% precision, 6575/6575) | text parity 92.1% — remaining drift is asciidoc markup / whitespace micro-differences |
 | R6 BM25 search | ✓ | `tests/parity_bm25.rs` passes; fixture in `tests/fixtures/bm25_top5_head.json` (regen via `target/dump_bm25_top5.py`) |
 | R7 MCP server | ✓ | 8 tools registered, init+tools/list+tools/call verified |
 | R7 candle embeddings | ✓ | candle 0.8 + bge-small; CPU is the bottleneck (`VKQUERY_EMBED_LIMIT` for fast iteration) |
