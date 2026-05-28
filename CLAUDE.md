@@ -7,9 +7,10 @@ Agent entrypoint for the Rust port of `vkquery`. Read this first.
 `vkquery-rs` is a Rust rewrite of the Python `vkquery` package
 (reference impl at `../vkquery/`). Same 8 query primitives, same shard
 layout, same Vulkan-Docs git-tag pinning. Goal: single static binary
-(currently ~2.5MB stripped on Windows x86-64 without the `embed`
-feature; ~35MB with). Both impls write to the same cache so the Rust
-build can read Python-built shards and vice versa.
+(currently ~3.7MB stripped on Windows x86-64 with `--no-default-features
+--features mcp`; ~13MB with default features which include `embed`).
+Both impls write to the same cache so the Rust build can read
+Python-built shards and vice versa.
 
 ## Where to read next
 
@@ -31,8 +32,11 @@ build can read Python-built shards and vice versa.
    order — when in doubt build via the `json!` macro.
 2. **New indices must be added to `XML_INDEX_NAMES`** in
    `src/index/build.rs`. That's the freshness gate.
-3. **Optional deps stay optional**. `embed` and `mcp` are cargo features.
-   `embed` is excluded from default features pending the candle 0.8 bump.
+3. **Optional deps stay optional**. `embed` and `mcp` are cargo features
+   and are both in the default set (candle 0.8 bump landed). For a slim
+   ~3.7MB binary build with `--no-default-features --features mcp`. GPU
+   backends (`cuda`, `cudnn`, `mkl`, `accelerate`, `metal`) are mutually
+   exclusive and each implies `embed` — see `Cargo.toml` for the matrix.
 4. **Don't fork Vulkan-Docs parsing**. The python ref reuses `reg.py` /
    `validitygenerator.py`. The Rust port re-derives — when implicit VUID
    rules drift upstream, fix the rule in `src/index/vuid_implicit.rs` and
@@ -97,9 +101,13 @@ tests/
   fixtures/            golden implicit VUID dump + Python BM25 top-5 fixture
 docs/
   usage.md             detailed CLI / library / MCP usage manual
+.github/workflows/
+  ci.yml               3-OS test matrix + embed-build smoke
+  release.yml          v* tag → 3-target binaries + shards (calls shards.yml)
+  shards.yml           HEAD + latest 5 v1.x.y tags → slim shard tarballs; weekly schedule + workflow_dispatch + workflow_call
 ```
 
-## Status (R0–R8 of the rewrite plan)
+## Status (R0–R9 of the rewrite plan)
 
 | R | Done | Notes |
 |---|---|---|
@@ -109,4 +117,5 @@ docs/
 | R6 BM25 search | ✓ | `tests/parity_bm25.rs` passes; fixture in `tests/fixtures/bm25_top5_head.json` (regen via `target/dump_bm25_top5.py`) |
 | R7 MCP server | ✓ | 8 tools registered, init+tools/list+tools/call verified |
 | R7 candle embeddings | ✓ | candle 0.8 + bge-small; CPU is the bottleneck (`VKQUERY_EMBED_LIMIT` for fast iteration) |
-| R8 polish | partial | README + CLAUDE.md + docs/usage.md done; CI cross-compile + GH release TODO |
+| R8 polish | ✓ | README + CLAUDE.md + docs/usage.md done; `.github/workflows/ci.yml` (3-OS test matrix + linux embed build) and `release.yml` (3-target binaries + sha256 + GH Release on `v*` tags) landed |
+| R9 pre-built shard distribution | ✓ | `.github/workflows/shards.yml` publishes HEAD + latest 5 v1.x.y slim shards to a rolling `shards-latest` release weekly; `release.yml` invokes it via `workflow_call` so v* releases bundle the same shards; `vkquery cache info` exposes the local cache layout to users |

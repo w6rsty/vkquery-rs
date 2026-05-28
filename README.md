@@ -52,6 +52,33 @@ on Windows or `$XDG_CACHE_HOME/vkquery/Vulkan-Docs/` elsewhere). Override the
 clone location with `VKQUERY_DOCS_PATH=<path>`. Override the cache with
 `VKQUERY_CACHE_DIR=<path>`.
 
+### Pre-built shards (optional)
+
+Each `function` / `struct` / … call lazily builds the shard for the requested
+tag on first use (~minutes per tag, including the BM25 corpus build). To skip
+that one-time cost, drop a pre-built slim shard into your cache:
+
+```bash
+# Find where vkquery wants its cache to live:
+vkquery cache info
+
+# Then, for the tag you care about:
+curl -L -o vkquery-shard-v1.4.352-slim.tar.gz \
+  https://github.com/w6rsty/vkquery-rs/releases/download/shards-latest/vkquery-shard-v1.4.352-slim.tar.gz
+tar -xzf vkquery-shard-v1.4.352-slim.tar.gz -C "$VKQUERY_CACHE_DIR"
+```
+
+Pre-built shards live on the rolling [`shards-latest`](https://github.com/w6rsty/vkquery-rs/releases/tag/shards-latest)
+release (refreshed weekly with HEAD + the 5 most recent `v1.x.y` tags) and
+also appear as assets on each `v*` binary release. Tarballs are slim — they
+contain the BM25 + XML indices but **not** the BERT embeddings layer. To use
+`--mode embed` / `--mode hybrid`, run `vkquery index build --tag <T> --force`
+once after extraction so the local embedding pass runs alongside the
+already-extracted shard.
+
+Windows users: `tar.exe` ships with Windows 10+; the recipe above works
+unchanged in PowerShell.
+
 ## GPU acceleration
 
 CPU BERT inference on Windows without MKL clocks ~32 vec/30s, so a full HEAD

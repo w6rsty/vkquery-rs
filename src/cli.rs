@@ -97,6 +97,11 @@ pub enum Cmd {
         #[command(subcommand)]
         action: DocsAction,
     },
+    /// Inspect the local shard cache (location + installed shards).
+    Cache {
+        #[command(subcommand)]
+        action: CacheAction,
+    },
     /// Run the MCP stdio server.
     Mcp,
 }
@@ -125,6 +130,12 @@ pub enum DocsAction {
     Update,
     Path,
     Tags,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CacheAction {
+    /// Print cache root path and list installed shards with sizes.
+    Info,
 }
 
 pub fn run() -> Result<()> {
@@ -164,6 +175,7 @@ pub fn run() -> Result<()> {
         }
         Cmd::Index { action } => run_index(action),
         Cmd::Docs { action } => run_docs(action),
+        Cmd::Cache { action } => run_cache(action),
         Cmd::Mcp => {
             #[cfg(feature = "mcp")]
             {
@@ -261,4 +273,57 @@ fn gc(cache: &Cache, keep_last: usize) -> Result<()> {
         }))?
     );
     Ok(())
+}
+
+fn run_cache(action: CacheAction) -> Result<()> {
+    let cache = Cache::new(None);
+    match action {
+        CacheAction::Info => {
+            let shards = cache.list_shards();
+            let mut entries = Vec::with_capacity(shards.len());
+            let mut total = 0u64;
+            for (tag, info) in &shards {
+                let size = dir_size(std::path::Path::new(&info.shard_dir)).unwrap_or(0);
+                total += size;
+                let sha_short =
+                    &info.vkxml_sha[..info.vkxml_sha.len().min(12)];
+                entries.push(serde_json::json!({
+                    "tag": tag,
+                    "shard_dir": info.shard_dir,
+                    "commit_sha": info.commit_sha,
+                    "vkxml_sha": info.vkxml_sha,
+                    "vkxml_sha_short": sha_short,
+                    "builder_version": info.builder_version,
+                    "built_at": info.built_at,
+                    "size_bytes": size,
+                }));
+            }
+            let payload = serde_json::json!({
+                "cache_root": cache.root.to_string_lossy(),
+                "tags_index_path": cache.tags_index_path.to_string_lossy(),
+                "shard_count": entries.len(),
+                "total_size_bytes": total,
+                "shards": entries,
+            });
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+        }
+    }
+    Ok(())
+}
+
+fn dir_size(p: &std::path::Path) -> std::io::Result<u64> {
+    if !p.is_dir() {
+        return Ok(0);
+    }
+    let mut total = 0u64;
+    for entry in std::fs::read_dir(p)? {
+        let entry = entry?;
+        let meta = entry.metadata()?;
+        if meta.is_file() {
+            total += meta.len();
+        } else if meta.is_dir() {
+            total += dir_size(&entry.path())?;
+        }
+    }
+    Ok(total)
 }

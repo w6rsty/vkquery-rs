@@ -1,0 +1,217 @@
+name: shards
+
+# Builds slim (no-embed) index shards for HEAD + the latest N v1.x.y tags
+# of Vulkan-Docs and publishes them as assets on the rolling `shards-latest`
+# GitHub Release. End users extract one tarball straight into their
+# $VKQUERY_CACHE_DIR and skip the first-query rebuild.
+#
+# Decoupled from release.yml on purpose — Vulkan-Docs ships weekly tags and
+# we want shard refreshes on that cadence, not on our binary release cadence.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Override: space- or comma-separated list of tags (e.g. 'HEAD v1.4.352'). Empty = use latest_n."
+        required: false
+        default: ""
+      latest_n:
+        description: "How many of the most recent v1.x.y tags to build (in addition to HEAD)."
+        required: false
+        default: "5"
+      publish:
+        description: "Attach archives to the rolling shards-latest release."
+        type: boolean
+        required: false
+        default: true
+  schedule:
+    # Weekly refresh on Monday 06:00 UTC — picks up Vulkan-Docs' typical
+    # weekly tag cadence the morning after Khronos lands new tags.
+    - cron: "0 6 * * 1"
+  workflow_call:
+    inputs:
+      tags:
+        type: string
+        required: false
+        default: ""
+      latest_n:
+        type: string
+        required: false
+        default: "5"
+      publish:
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: shards-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # No embedding shard — keeps build time within the runner cap and the
+  # archives small. Users add embeddings locally with
+  # `vkquery index build --tag <T> --force` after extracting.
+  VKQUERY_SKIP_EMBED: "1"
+  # Cache root scoped to the runner workspace so artifacts can be tar'd from
+  # a predictable path. Must be an absolute path that exists.
+  VKQUERY_CACHE_DIR: ${{ github.workspace }}/.vkcache
+  # Point the binary at the explicit Vulkan-Docs clone next to vkquery-rs
+  # so it never tries auto-discovery / re-cloning at $HOME/.cache/vkquery.
+  VKQUERY_DOCS_PATH: ${{ github.workspace }}/../Vulkan-Docs
+
+jobs:
+  build:
+    name: build-shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout vkquery-rs
+        uses: actions/checkout@v4
+
+      - name: Clone Vulkan-Docs (shallow, blobless)
+        # Mirrors .github/workflows/ci.yml — keeps the clone under ~50MB.
+        # The fetch of v* refs is required because --depth=1 does not bring
+        # tags by default; we need them locally to resolve `vkquery index
+        # build --tag vX.Y.Z`.
+        shell: bash
+        run: |
+          git clone --depth=1 --filter=blob:none \
+            https://github.com/KhronosGroup/Vulkan-Docs.git \
+            ../Vulkan-Docs
+          git -C ../Vulkan-Docs fetch --depth=1 --filter=blob:none \
+            origin 'refs/tags/v*:refs/tags/v*'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: shards-linux
+
+      - name: Build vkquery (slim)
+        run: cargo build --release --no-default-features --features mcp
+
+      - name: Resolve tag list
+        id: tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          OVERRIDE='${{ inputs.tags }}'
+          OVERRIDE=$(echo "$OVERRIDE" | tr ',' ' ' | xargs || true)
+          if [ -n "$OVERRIDE" ]; then
+            TAGS="$OVERRIDE"
+          else
+            N='${{ inputs.latest_n }}'
+            : "${N:=5}"
+            RECENT=$(git -C ../Vulkan-Docs tag --list 'v1.*' --sort=-version:refname | head -n "$N" | tr '\n' ' ')
+            TAGS="HEAD $RECENT"
+            TAGS=$(echo "$TAGS" | xargs)
+          fi
+          echo "Resolved tags: $TAGS"
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Build shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$VKQUERY_CACHE_DIR"
+          for t in ${{ steps.tags.outputs.tags }}; do
+            echo "::group::index build --tag $t"
+            ./target/release/vkquery index build --tag "$t" --force
+            echo "::endgroup::"
+          done
+
+      - name: Package archives
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for t in ${{ steps.tags.outputs.tags }}; do
+            archive="vkquery-shard-${t}-slim.tar.gz"
+            # Archive contents are rooted at `tags/<tag>/<sha[:12]>/...` so
+            # users extract via `tar -xzf - -C "$VKQUERY_CACHE_DIR"`.
+            tar -czf "dist/${archive}" -C "$VKQUERY_CACHE_DIR" "tags/${t}"
+            (cd dist && sha256sum "${archive}" | awk '{print $1}' > "${archive}.sha256")
+            echo "Built dist/${archive} ($(du -h "dist/${archive}" | cut -f1))"
+          done
+          ls -lh dist
+
+      - name: Smoke test (extract + query without rebuild)
+        shell: bash
+        run: |
+          set -euo pipefail
+          SMOKE_DIR=$(mktemp -d)
+          # Pick the first non-HEAD tag if available so we exercise a tag
+          # path; fall back to HEAD if the override only listed HEAD.
+          PROBE_TAG=$(echo '${{ steps.tags.outputs.tags }}' | tr ' ' '\n' | grep -v '^HEAD$' | head -n1 || true)
+          if [ -z "$PROBE_TAG" ]; then
+            PROBE_TAG=HEAD
+          fi
+          echo "Smoke-testing extracted shard for $PROBE_TAG into $SMOKE_DIR"
+          tar -xzf "dist/vkquery-shard-${PROBE_TAG}-slim.tar.gz" -C "$SMOKE_DIR"
+
+          # Run with the throwaway cache. The Vulkan-Docs clone is still
+          # available because resolve_ref() still needs it to derive the
+          # path — this is the documented v1 limitation, the shard itself
+          # still skips the heavy parse + corpus build.
+          export VKQUERY_CACHE_DIR="$SMOKE_DIR"
+          export RUST_LOG=info
+          ./target/release/vkquery function vkCmdDraw --tag "$PROBE_TAG" > smoke.json 2> smoke.log
+          if grep -q 'building shard' smoke.log; then
+            echo "::error::extracted shard was not picked up — rebuild was triggered"
+            sed -n '1,40p' smoke.log
+            exit 1
+          fi
+          PARAM_COUNT=$(jq '.params | length' < smoke.json)
+          if [ "$PARAM_COUNT" -lt 1 ]; then
+            echo "::error::vkCmdDraw payload had no params"
+            head -c 2000 smoke.json
+            exit 1
+          fi
+          echo "Smoke OK: $PARAM_COUNT params returned, no rebuild."
+
+      - name: Upload artifact (for workflow_call consumers)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vkquery-shards-slim
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish to shards-latest release
+        # `schedule` events have no inputs context, so explicitly publish on
+        # scheduled runs. Manual dispatch / workflow_call respect the input.
+        if: ${{ inputs.publish || github.event_name == 'schedule' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: shards-latest
+          name: "Pre-built shards (rolling)"
+          body: |
+            Pre-built slim index shards for Vulkan-Docs. Updated by
+            `.github/workflows/shards.yml`. Each archive extracts into your
+            `$VKQUERY_CACHE_DIR`:
+
+            ```
+            tar -xzf vkquery-shard-<tag>-slim.tar.gz -C "$VKQUERY_CACHE_DIR"
+            ```
+
+            Shards do not contain the BERT embeddings layer. Run
+            `vkquery index build --tag <tag> --force` locally to add it.
+
+            Built from Vulkan-Docs HEAD + the 5 most recent v1.x.y tags
+            (override available via `workflow_dispatch`). See
+            [`docs/usage.md`](https://github.com/${{ github.repository }}/blob/main/docs/usage.md)
+            for the install recipe.
+          prerelease: true
+          make_latest: false
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          fail_on_unmatched_files: true
+
+permissions:
+  contents: write

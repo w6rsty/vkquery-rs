@@ -94,6 +94,40 @@ cargo install --path C:\dev\vkquery-rs --features mcp --no-default-features
 
 Python 与 Rust 实现 shard 完全互通——可以用 Python 构建、Rust 查询，反之亦然。
 
+### 2.4 预构建 shard（可选）
+
+每个 tag 的首次查询会触发完整 shard 构建（XML 解析 + BM25 语料 + 可选 embedding），
+冷启动数分钟到数小时。为跳过这一次性开销，可直接下载预构建 slim shard 解压到
+缓存目录：
+
+```bash
+# 1. 查看 cache 位置（不需要预先建过 shard 也能查）
+vkquery cache info
+
+# 2. 从 shards-latest 滚动 release 下载对应 tag 的 tarball
+curl -L -o vkquery-shard-v1.4.352-slim.tar.gz \
+  https://github.com/w6rsty/vkquery-rs/releases/download/shards-latest/vkquery-shard-v1.4.352-slim.tar.gz
+
+# 3. 解压进 $VKQUERY_CACHE_DIR（归档根目录是 tags/<tag>/<sha[:12]>/...）
+tar -xzf vkquery-shard-v1.4.352-slim.tar.gz -C "$VKQUERY_CACHE_DIR"
+```
+
+预构建 shard 由 `.github/workflows/shards.yml` 每周一 06:00 UTC 自动刷新，覆盖
+**HEAD + 最近 5 个 v1.x.y tag**；每次 `v*` 二进制 release 也会附带同一批 shard
+作为资产。归档内容**只含 BM25 + XML 索引**，不含 embeddings 层——使用
+`--mode embed` 或 `--mode hybrid` 时仍需本地补一次 embedding：
+
+```bash
+vkquery index build --tag v1.4.352 --force   # 复用已有 BM25 + XML，仅跑 embedding
+```
+
+**已知限制**：即便 shard 已落地，第一次查询仍会调用 `git rev-parse` 解析
+tag → 提交哈希，所以本地仍需要一个 Vulkan-Docs 克隆（轻量；`vkquery cache info`
+只需查 shard 元信息不触发克隆）。Shard 节省的是 XML 解析 + 语料构建的几分钟，
+不是 git 克隆的几十秒。
+
+Windows 用户：`tar.exe` 在 Win10+ 内置，PowerShell 中上述命令同样可用。
+
 ## 三、CLI 命令
 
 所有命令默认输出格式化 JSON。`--tag <v1.x.y>` 可省略（默认 `HEAD`）。
@@ -208,6 +242,9 @@ vkquery index build --latest 5                          # 最近 5 个 tag
 
 # 列出现有 shard
 vkquery index list
+
+# 列出 cache 根目录 + 每个 shard 的 tag / 内容哈希 / 体积 / 构建时间
+vkquery cache info
 
 # 清理旧 shard（保留最近 N 个 + HEAD）
 vkquery index gc --keep-last 10
