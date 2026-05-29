@@ -158,7 +158,9 @@ jobs:
           # still skips the heavy parse + corpus build.
           export VKQUERY_CACHE_DIR="$SMOKE_DIR"
           export RUST_LOG=info
-          ./target/release/vkquery function vkCmdDraw --tag "$PROBE_TAG" > smoke.json 2> smoke.log
+          # --json: the CLI defaults to a human-readable summary now, so the
+          # jq assertion below needs the structured payload explicitly.
+          ./target/release/vkquery function vkCmdDraw --tag "$PROBE_TAG" --json > smoke.json 2> smoke.log
           if grep -q 'building shard' smoke.log; then
             echo "::error::extracted shard was not picked up — rebuild was triggered"
             sed -n '1,40p' smoke.log
