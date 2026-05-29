@@ -7,8 +7,9 @@ Agent entrypoint for `vkquery-rs`. Read this first.
 `vkquery-rs` is a single-binary query/retrieval layer over Khronos
 Vulkan-Docs, written in Rust. 8 query primitives, all version-pinned
 via `--tag v1.x.y`. Three frontends share one cache: CLI, Rust library,
-MCP stdio server. Slim build ~3.7MB (`--no-default-features --features
-mcp`); default build with semantic search ~13MB.
+MCP stdio server. Slim build ~5.4MB (`--no-default-features --features
+mcp`; includes the rustls/flate2/tar stack for `index fetch`); default
+build with semantic search ~13MB.
 
 Shard layout is **content-addressed** on the git blob SHA of `xml/vk.xml`,
 so the cache is byte-stable and portable across machines — pre-built
@@ -38,7 +39,7 @@ into `$VKQUERY_CACHE_DIR`.
 2. **New indices must be added to `XML_INDEX_NAMES`** in
    `src/index/build.rs`. That's the freshness gate.
 3. **Optional deps stay optional**. `embed` and `mcp` are cargo features
-   and are both in the default set. For a slim ~3.7MB binary build with
+   and are both in the default set. For a slim ~5.4MB binary build with
    `--no-default-features --features mcp`. GPU backends (`cuda`, `cudnn`,
    `mkl`, `accelerate`, `metal`) are mutually exclusive and each implies
    `embed` — see `Cargo.toml` for the matrix.

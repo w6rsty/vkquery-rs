@@ -21,7 +21,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["mcp", "embed"]
-embed = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:ureq", "dep:ndarray", "dep:serde_bytes"]
+embed = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:ndarray", "dep:serde_bytes"]
 mcp = ["dep:rmcp"]
 # GPU / SIMD acceleration for the embedding model. Each implies `embed`.
 # These are MUTUALLY EXCLUSIVE — enabling more than one (e.g.
@@ -65,6 +65,12 @@ hex = "0.4"
 dirs = "5"
 # Progress reporting (TTY-aware; silenced under pipes / MCP / VKQUERY_NO_PROGRESS=1)
 indicatif = "0.17"
+# HTTP downloads for `index fetch` (pre-built shards) and the embedding
+# model. Sync, rustls-backed — no async runtime needed for downloads.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+# Shard tarball extraction (`index fetch`). Pure-Rust gzip + tar.
+flate2 = "1"
+tar = "0.4"
 
 # --- Optional, feature-gated -------------------------------------------------
 # MCP server
@@ -77,9 +83,6 @@ candle-core = { version = "0.8", optional = true }
 candle-nn = { version = "0.8", optional = true }
 candle-transformers = { version = "0.8", optional = true }
 tokenizers = { version = "0.20", default-features = false, features = ["onig"], optional = true }
-# Direct HTTP downloads — hf-hub 0.3 hit a "RelativeUrlWithoutBase" bug on
-# Windows redirect handling, so we just fetch the 3 model files ourselves.
-ureq = { version = "2", default-features = false, features = ["tls"], optional = true }
 serde_bytes = { version = "0.11", optional = true }
 
 [dev-dependencies]

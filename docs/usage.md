@@ -101,18 +101,26 @@ Python 与 Rust 实现 shard 完全互通——可以用 Python 构建、Rust �
 ### 2.4 预构建 shard（可选）
 
 每个 tag 的首次查询会触发完整 shard 构建（XML 解析 + BM25 语料 + 可选 embedding），
-冷启动数分钟到数小时。为跳过这一次性开销，可直接下载预构建 slim shard 解压到
-缓存目录：
+冷启动数分钟到数小时。为跳过这一次性开销，用 `index fetch` 直接拉取预构建 slim
+shard：
 
 ```bash
-# 1. 查看 cache 位置（不需要预先建过 shard 也能查）
-vkquery cache info
+vkquery index fetch --tag v1.4.352   # 下载 + 校验 SHA-256 + 解压到 $VKQUERY_CACHE_DIR
+vkquery index fetch                  # 默认 --tag HEAD
+vkquery index fetch --all            # release 上发布的所有 tag
+```
 
-# 2. 从 shards-latest 滚动 release 下载对应 tag 的 tarball
+`index fetch` 会从 GitHub Releases 下载 tarball、对照发布的 SHA-256 校验、解压进
+缓存并登记到 `tags-index.json`——无需 `curl`/`tar`，fetch 本身也不需要 Vulkan-Docs
+克隆。命令幂等（重复运行会跳过已存在的 shard，`--force` 强制重新下载），
+`--release <tag>` 可指定具体的 `v*` release 而非滚动 release。
+
+手动方式（无 vkquery 二进制时的等价操作）：
+
+```bash
+vkquery cache info   # 查看 cache 位置
 curl -L -o vkquery-shard-v1.4.352-slim.tar.gz \
   https://github.com/w6rsty/vkquery-rs/releases/download/shards-latest/vkquery-shard-v1.4.352-slim.tar.gz
-
-# 3. 解压进 $VKQUERY_CACHE_DIR（归档根目录是 tags/<tag>/<sha[:12]>/...）
 tar -xzf vkquery-shard-v1.4.352-slim.tar.gz -C "$VKQUERY_CACHE_DIR"
 ```
 

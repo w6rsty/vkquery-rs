@@ -41,7 +41,7 @@ explicit VUIDs from your first query, with no spec build toolchain on
 your machine.
 
 Net effect: spec lookups go from "set up a multi-language build
-environment" to "download a 4MB binary".
+environment" to "download a ~5MB binary".
 
 ## Features
 
@@ -76,7 +76,7 @@ the full machine-readable payload.
 
 ```bash
 cargo install --path .                                       # default — mcp + embed (~13MB)
-cargo install --path . --no-default-features --features mcp  # slim (~3.7MB), no semantic search
+cargo install --path . --no-default-features --features mcp  # slim (~5.4MB), no semantic search
 cargo install --path . --no-default-features                 # library only, no MCP, no embed
 ```
 
@@ -116,18 +116,20 @@ output.
 
 Each `function` / `struct` / … call lazily builds the shard for the
 requested tag on first use (~minutes per tag, including the BM25 corpus
-build). To skip that one-time cost, drop a pre-built slim shard into
-your cache:
+build). To skip that one-time cost, fetch a pre-built slim shard:
 
 ```bash
-# Find where vkquery wants its cache to live:
-vkquery cache info
-
-# Then, for the tag you care about:
-curl -L -o vkquery-shard-v1.4.352-slim.tar.gz \
-  https://github.com/w6rsty/vkquery-rs/releases/download/shards-latest/vkquery-shard-v1.4.352-slim.tar.gz
-tar -xzf vkquery-shard-v1.4.352-slim.tar.gz -C "$VKQUERY_CACHE_DIR"
+vkquery index fetch --tag v1.4.352   # download + verify + extract one tag
+vkquery index fetch                  # defaults to --tag HEAD
+vkquery index fetch --all            # every tag published on the release
 ```
+
+`index fetch` downloads the tarball from GitHub Releases, checks it
+against the published SHA-256, extracts it into your `$VKQUERY_CACHE_DIR`,
+and registers it — no `curl`/`tar` and no Vulkan-Docs clone required for
+the fetch itself. It is idempotent (re-running skips an already-present
+shard; pass `--force` to re-download), and `--release <tag>` lets you pin
+to a specific `v*` release instead of the rolling one.
 
 Pre-built shards live on the rolling
 [`shards-latest`](https://github.com/w6rsty/vkquery-rs/releases/tag/shards-latest)
@@ -135,11 +137,8 @@ release (refreshed weekly with HEAD + the 5 most recent `v1.x.y` tags)
 and also appear as assets on each `v*` binary release. Tarballs are
 slim — they contain the BM25 + XML indices but **not** the BERT
 embeddings layer. To use `--mode embed` / `--mode hybrid`, run
-`vkquery index build --tag <T> --force` once after extraction so the
+`vkquery index build --tag <T> --force` once after fetching so the
 local embedding pass runs alongside the already-extracted shard.
-
-Windows users: `tar.exe` ships with Windows 10+; the recipe above works
-unchanged in PowerShell.
 
 ## GPU acceleration
 
