@@ -57,6 +57,7 @@ cargo install --path . --features mcp --no-default-features
 | `VKQUERY_SKIP_EMBED` | （未设） | 设为 `1` 时跳过 embedding 索引构建（BM25 仍建） |
 | `VKQUERY_EMBED_LIMIT` | （未设） | 限制 embedding 语料的前 N 条，开发用 |
 | `VKQUERY_HYBRID_RRF_K` | `60` | hybrid 搜索的 RRF 阻尼常数；较小值放大 top-rank 差距，用于调参实验 |
+| `VKQUERY_NO_PROGRESS` | （未设） | 设为任何值时禁用 stderr 上的进度条（spinner + embedding 进度条）；管道 / MCP / 非 TTY 环境自动禁用 |
 
 ### 2.2 首次运行行为
 
@@ -68,6 +69,13 @@ cargo install --path . --features mcp --no-default-features
    - HEAD（仅 BM25）：约 4–5 秒。
    - HEAD（含 embeddings）：CPU 上约 7 小时（27K 条文本）。开发时用
      `VKQUERY_SKIP_EMBED=1` 或 `VKQUERY_EMBED_LIMIT=N` 加速。
+
+stderr 是 TTY 时（在终端直接跑 `vkquery`），shard 构建期间会看到一个
+带阶段名的 spinner（如 `Parsing vk.xml registry`、
+`Extracting explicit VUIDs from chapters/*.adoc` 等）。embedding 阶段
+会切到带 N/total + ETA 的进度条。把输出 pipe 走、从 MCP 客户端启动、
+或设 `VKQUERY_NO_PROGRESS=1` 时自动静默——不会污染 JSON 输出或 MCP
+stdio 协议。
 
 同一 (tag, vk.xml content-hash) 后续查询 <50ms。
 

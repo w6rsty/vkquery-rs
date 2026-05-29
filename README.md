@@ -96,6 +96,11 @@ The binary auto-clones the Vulkan-Docs repo on first run (into
 location with `VKQUERY_DOCS_PATH=<path>`. Override the cache with
 `VKQUERY_CACHE_DIR=<path>`.
 
+Run `vkquery config` to see the resolved cache dir / docs path, the
+current values of every recognised `VKQUERY_*` env var, and which cargo
+features the binary was built with. Add `--json` for machine-readable
+output.
+
 ### Pre-built shards (optional)
 
 Each `function` / `struct` / … call lazily builds the shard for the

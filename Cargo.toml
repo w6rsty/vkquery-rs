@@ -63,6 +63,8 @@ sha2 = "0.10"
 hex = "0.4"
 # Filesystem
 dirs = "5"
+# Progress reporting (TTY-aware; silenced under pipes / MCP / VKQUERY_NO_PROGRESS=1)
+indicatif = "0.17"
 
 # --- Optional, feature-gated -------------------------------------------------
 # MCP server

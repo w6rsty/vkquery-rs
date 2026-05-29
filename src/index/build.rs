@@ -6,7 +6,11 @@
 //! implicit VUIDs → BM25 corpus → optional BERT embeddings (gated by
 //! `embed` feature and `VKQUERY_SKIP_EMBED`).
 
+use std::io::IsTerminal;
+use std::time::Duration;
+
 use anyhow::{Context, Result};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::cache::{Cache, Shard};
 use crate::docs_source::DocsSource;
@@ -14,6 +18,69 @@ use crate::git::TagReader;
 use crate::index::{prose, reverse, vuid_explicit, vuid_implicit, xml_index};
 use crate::search::bm25::{Bm25, Bm25Doc};
 use crate::registry;
+
+/// Phase-by-phase progress for shard builds. Renders a stderr spinner +
+/// embedding bar when running under a TTY; falls back to hidden no-ops
+/// when stderr is piped (CI logs, library consumers, MCP stdio server)
+/// or when `VKQUERY_NO_PROGRESS=1` is set. All methods are cheap; the
+/// hidden ProgressBar from indicatif is a documented no-op.
+struct Phases {
+    // `multi` and `enabled` are only read by `embed_bar`, which is itself
+    // only called when the `embed` feature is on. Suppress the dead-code
+    // lint that fires on the slim (no-embed) build matrix.
+    #[allow(dead_code)]
+    multi: MultiProgress,
+    current: ProgressBar,
+    #[allow(dead_code)]
+    enabled: bool,
+}
+
+impl Phases {
+    fn new() -> Self {
+        let enabled = std::io::stderr().is_terminal()
+            && std::env::var_os("VKQUERY_NO_PROGRESS").is_none();
+        let multi = MultiProgress::new();
+        let current = if enabled {
+            let pb = multi.add(ProgressBar::new_spinner());
+            pb.set_style(
+                ProgressStyle::with_template("{spinner:.cyan} {wide_msg}")
+                    .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+            );
+            pb.enable_steady_tick(Duration::from_millis(120));
+            pb
+        } else {
+            ProgressBar::hidden()
+        };
+        Self { multi, current, enabled }
+    }
+
+    fn phase(&self, msg: &str) {
+        self.current.set_message(msg.to_string());
+    }
+
+    /// Determinate child bar for the embedding phase (the only step long
+    /// enough to want a percentage / ETA). Hidden under non-TTY. Only
+    /// called when the `embed` feature is compiled in.
+    #[allow(dead_code)]
+    fn embed_bar(&self, total: u64) -> ProgressBar {
+        if !self.enabled {
+            return ProgressBar::hidden();
+        }
+        let pb = self.multi.add(ProgressBar::new(total));
+        pb.set_style(
+            ProgressStyle::with_template(
+                "  {bar:32.cyan/blue} {pos}/{len} embedding (ETA {eta})",
+            )
+            .unwrap_or_else(|_| ProgressStyle::default_bar())
+            .progress_chars("##-"),
+        );
+        pb
+    }
+
+    fn finish(&self, msg: &str) {
+        self.current.finish_with_message(msg.to_string());
+    }
+}
 
 /// Per-shard JSON file names. Used by the freshness check — if any of these
 /// is missing, the shard is considered stale and gets rebuilt.
@@ -51,19 +118,26 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
     }
     tracing::info!("building shard for {tag} (commit {})", &shard.commit_sha[..12.min(shard.commit_sha.len())]);
 
+    let phases = Phases::new();
+    phases.phase(&format!("Reading vk.xml at {tag}"));
+
     let xml_bytes = {
         let mut reader = TagReader::open(source).context("open cat-file")?;
         read_vk_xml(&mut reader, tag)?
     };
     let xml = std::str::from_utf8(&xml_bytes).context("vk.xml is not utf-8")?;
+    phases.phase("Parsing vk.xml registry");
     let reg = registry::parse_registry(xml).with_context(|| format!("parse vk.xml at {tag}"))?;
+    phases.phase("Building XML entity indices");
     let mut result = xml_index::build_all(&reg);
+    phases.phase("Building reverse index");
     let reverse_value = reverse::build_reverse(&reg, &result.aliases);
 
     // Extract explicit VUIDs from chapters/*.adoc at the same ref. Derived
     // implicit VUIDs are merged in below — explicit wins on collisions.
     // If chapter extraction fails (e.g. legacy tags without `chapters/`),
     // we proceed; functions/structs still get a `vuid_refs: []` field.
+    phases.phase("Extracting explicit VUIDs from chapters/*.adoc");
     let mut vuids = std::collections::BTreeMap::new();
     {
         match TagReader::open(source) {
@@ -77,6 +151,7 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
 
     // Derive implicit VUIDs from XML attributes. We need the `extended_by`
     // map for pNext extender chains — pull it from the reverse index.
+    phases.phase("Deriving implicit VUIDs from vk.xml attributes");
     {
         let mut extended_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         if let Some(eb) = reverse_value.get("extended_by").and_then(|v| v.as_object()) {
@@ -90,7 +165,7 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
             }
         }
         let implicit = vuid_implicit::derive_from_registry(&reg, &extended_by);
-        // Merge: explicit wins on collisions (matches Python `merge` semantics).
+        // Merge: explicit wins on collisions.
         for (id, v) in implicit {
             vuids.entry(id).or_insert(v);
         }
@@ -115,6 +190,7 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
         }
     }
 
+    phases.phase("Writing index JSON files");
     std::fs::create_dir_all(&shard.root)
         .with_context(|| format!("mkdir {}", shard.root.display()))?;
     for (name, value) in &result.entities {
@@ -125,6 +201,7 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
     shard.write_json("vuids", &vuids)?;
 
     // Prose sections + BM25 lexical index for `search_concept` queries.
+    phases.phase("Extracting prose sections from chapters/*.adoc");
     let sections = {
         match TagReader::open(source) {
             Ok(mut chapter_reader) => prose::extract_sections(&mut chapter_reader, tag)
@@ -138,6 +215,7 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
             }
         }
     };
+    phases.phase("Tokenizing BM25 corpus");
     let mut bm25_docs: Vec<Bm25Doc> = Vec::with_capacity(sections.len() + vuids.len());
     for s in &sections {
         if s.text.is_empty() {
@@ -171,6 +249,7 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
             tokens,
         });
     }
+    phases.phase("Building BM25 index");
     let bm25 = Bm25::from_docs(bm25_docs);
     if let Err(e) = bm25.save(&shard.bm25_dir()) {
         tracing::warn!("BM25 index write failed: {e:?}");
@@ -184,16 +263,26 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
     {
         let skip = std::env::var("VKQUERY_SKIP_EMBED").is_ok();
         if !skip {
+            phases.phase("Encoding embeddings (this is the slow one)");
+            // Conservative upper bound — actual N is sections + vuids minus
+            // empties; embed_bar's length is reset to the real total once
+            // build_index knows the post-filter count.
+            let embed_pb = phases.embed_bar((sections.len() + vuids.len()) as u64);
             match crate::search::embedding::build_index(
                 &sections,
                 &vuids,
                 &shard.embeddings_dir(),
                 None,
+                &embed_pb,
             ) {
                 Ok((n, dim, model)) => {
+                    embed_pb.finish_and_clear();
                     tracing::info!("embeddings: {n} vectors, dim={dim}, model={model}");
                 }
-                Err(e) => tracing::warn!("embedding build failed: {e:?}"),
+                Err(e) => {
+                    embed_pb.finish_and_clear();
+                    tracing::warn!("embedding build failed: {e:?}");
+                }
             }
         }
     }
@@ -211,8 +300,15 @@ pub fn build_shard(source: &DocsSource, cache: &Cache, tag: &str, force: bool) -
         "extension_count".to_string(),
         serde_json::Value::Number((reg.extensions.len() as u64).into()),
     );
+    phases.phase("Writing manifest");
     shard.write_manifest(Some(extra))?;
     cache.update_index(&shard)?;
+    phases.finish(&format!(
+        "shard built for {tag} ({} commands, {} types, {} extensions)",
+        reg.commands.len(),
+        reg.types.len(),
+        reg.extensions.len()
+    ));
     tracing::info!(
         "shard built at {} ({} types, {} commands, {} extensions)",
         shard.root.display(),

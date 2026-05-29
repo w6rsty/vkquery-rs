@@ -270,6 +270,7 @@ pub fn build_index(
     vuids: &std::collections::BTreeMap<String, serde_json::Value>,
     out_dir: &Path,
     model_id: Option<&str>,
+    progress: &indicatif::ProgressBar,
 ) -> Result<(usize, usize, String)> {
     let model_id = model_id.map(String::from).unwrap_or_else(resolved_model);
     let loaded = cached_load_model(&model_id)?;
@@ -321,8 +322,13 @@ pub fn build_index(
     }
 
     if texts.is_empty() {
+        progress.set_length(0);
         return Ok((0, dim, model_id));
     }
+    // We now know the post-filter (and post-VKQUERY_EMBED_LIMIT) total; the
+    // caller initialized the bar with an upper bound, so correct it here.
+    progress.set_length(texts.len() as u64);
+    progress.set_position(0);
     std::fs::create_dir_all(out_dir)
         .with_context(|| format!("mkdir {}", out_dir.display()))?;
     let vectors_path = out_dir.join("vectors.f32");
@@ -355,8 +361,10 @@ pub fn build_index(
             meta_file.write_all(line.as_bytes())?;
             meta_file.write_all(b"\n")?;
         }
+        let batch_n = (end - idx) as u64;
         written += end - idx;
         idx = end;
+        progress.inc(batch_n);
         if total >= 50 {
             tracing::debug!("embedded {written}/{total}");
         }
