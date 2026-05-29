@@ -53,12 +53,19 @@ into `$VKQUERY_CACHE_DIR`.
 
 ```powershell
 $env:VKQUERY_CACHE_DIR = "C:\dev\vkquery-rs\target\cache"
-cargo test --features mcp                                              # 32 tests, ~1m warm
-cargo run --features mcp -- function vkCmdDraw --tag HEAD               # full payload incl. VUIDs
+cargo test --features mcp                                              # 46 tests, ~1m warm
+cargo run --features mcp -- function vkCmdDraw --tag HEAD               # human summary (paged VUIDs)
+cargo run --features mcp -- function vkCmdDraw --tag HEAD --json        # full payload incl. all VUIDs
+cargo run --features mcp -- function vkCmdDraw --tag HEAD --all-vuids   # human, every VUID
 cargo run --features mcp -- diff v1.3.250 v1.4.350 --entity features    # shows VK_VERSION_1_4 added
 cargo run --features mcp -- search "image layout transition" --mode bm25 -k 3
 cargo run --features mcp -- vuid VUID-vkCmdDraw-None-02691
 ```
+
+CLI output is **human-readable by default** (a screenful summary with the
+VUID list paged at 20). Pass `--json` for the full machine-readable
+payload (the shape library/MCP consumers get), `--all-vuids` /
+`--vuid-offset N` to page the VUID list in human mode.
 
 For MCP smoke:
 
