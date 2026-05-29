@@ -80,6 +80,12 @@ Or grab a pre-built `mcp`-only binary from
 Linux x86-64, macOS arm64, or Windows x86-64. GPU backends (CUDA, Metal,
 MKL) require `cargo install` from source.
 
+Different builds ship different capabilities — the release binary is
+slim (`mcp`, no `embed`), so it offers `search --mode bm25` only and
+hides the `embed`/`hybrid` modes. Run `vkquery --version` or `vkquery
+config` to see which features your binary was built with; the CLI only
+exposes flags and subcommands the build actually supports.
+
 For development:
 
 ```bash

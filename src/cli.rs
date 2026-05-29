@@ -3,15 +3,49 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use std::sync::OnceLock;
+
 use crate::cache::Cache;
+use crate::config_info::enabled_features_string;
 use crate::docs_source::DocsSource;
 
+/// `--version` string: `0.1.0 (features: mcp, embed)`. clap prepends the
+/// binary name, so the user sees `vkquery 0.1.0 (features: mcp, embed)`.
+/// clap's `version`/`after_help` want a `&'static str`, so we build these
+/// once and leak them through a `OnceLock`.
+fn long_version() -> &'static str {
+    static V: OnceLock<String> = OnceLock::new();
+    V.get_or_init(|| {
+        format!("{} (features: {})", env!("CARGO_PKG_VERSION"), enabled_features_string())
+    })
+}
+
+/// `--help` footer line naming the compiled-in features, so a slim release
+/// binary makes its missing capabilities obvious without running a query.
+fn help_footer() -> &'static str {
+    static H: OnceLock<String> = OnceLock::new();
+    H.get_or_init(|| format!("Built with features: {}", enabled_features_string()))
+}
+
 #[derive(Parser, Debug)]
-#[command(name = "vkquery", about = "Vulkan-Docs query layer")]
+#[command(
+    name = "vkquery",
+    about = "Vulkan-Docs query layer",
+    version = long_version(),
+    after_help = help_footer()
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub cmd: Cmd,
 }
+
+/// Search modes available in this build. `embed`/`hybrid` require the
+/// `embed` feature; a slim binary only offers lexical `bm25` so clap rejects
+/// the unavailable modes at parse time instead of failing mid-query.
+#[cfg(feature = "embed")]
+const SEARCH_MODES: [&str; 3] = ["bm25", "embed", "hybrid"];
+#[cfg(not(feature = "embed"))]
+const SEARCH_MODES: [&str; 1] = ["bm25"];
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
@@ -84,7 +118,11 @@ pub enum Cmd {
         tag: String,
         #[arg(short = 'k', long = "k", default_value_t = 10)]
         k: usize,
-        #[arg(long, value_parser = ["bm25", "embed", "hybrid"], default_value = "hybrid")]
+        #[cfg(feature = "embed")]
+        #[arg(long, value_parser = SEARCH_MODES, default_value = "hybrid")]
+        mode: String,
+        #[cfg(not(feature = "embed"))]
+        #[arg(long, value_parser = SEARCH_MODES, default_value = "bm25")]
         mode: String,
     },
     /// Index management.
@@ -108,6 +146,7 @@ pub enum Cmd {
         json: bool,
     },
     /// Run the MCP stdio server.
+    #[cfg(feature = "mcp")]
     Mcp,
 }
 
@@ -182,16 +221,8 @@ pub fn run() -> Result<()> {
         Cmd::Docs { action } => run_docs(action),
         Cmd::Cache { action } => run_cache(action),
         Cmd::Config { json } => run_config(json),
-        Cmd::Mcp => {
-            #[cfg(feature = "mcp")]
-            {
-                crate::mcp_server::run()
-            }
-            #[cfg(not(feature = "mcp"))]
-            {
-                anyhow::bail!("vkquery was built without the `mcp` feature")
-            }
-        }
+        #[cfg(feature = "mcp")]
+        Cmd::Mcp => crate::mcp_server::run(),
     }
 }
 
