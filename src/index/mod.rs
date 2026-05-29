@@ -3,6 +3,7 @@
 
 pub mod build;
 pub mod diff;
+pub mod fetch;
 pub mod prose;
 pub mod reverse;
 pub mod vuid_explicit;

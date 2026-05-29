@@ -195,6 +195,20 @@ pub enum IndexAction {
         #[arg(long)]
         force: bool,
     },
+    /// Download a pre-built shard from GitHub Releases (no local build).
+    Fetch {
+        #[arg(long, default_value = "HEAD")]
+        tag: String,
+        /// Fetch every shard published on the release.
+        #[arg(long)]
+        all: bool,
+        /// Re-download even if a shard for the tag is already present.
+        #[arg(long)]
+        force: bool,
+        /// Release to pull assets from (advanced: pin to a v1.x.y release).
+        #[arg(long, default_value = "shards-latest")]
+        release: String,
+    },
     List,
     Gc {
         #[arg(long = "keep-last", default_value_t = 10)]
@@ -326,6 +340,7 @@ fn run_index(action: IndexAction) -> Result<()> {
                 crate::index::build::build_shard(&source, &cache, &t, force)?;
             }
         }
+        IndexAction::Fetch { tag, all, force, release } => run_fetch(&cache, &tag, all, force, &release)?,
         IndexAction::List => {
             let shards = cache.list_shards();
             println!("{}", serde_json::to_string_pretty(&shards)?);
@@ -381,6 +396,41 @@ fn gc(cache: &Cache, keep_last: usize) -> Result<()> {
         }))?
     );
     Ok(())
+}
+
+fn run_fetch(cache: &Cache, tag: &str, all: bool, force: bool, release: &str) -> Result<()> {
+    let tags: Vec<String> = if all {
+        let remote = crate::index::fetch::list_remote_tags(release)?;
+        if remote.is_empty() {
+            anyhow::bail!("no shard assets found on release `{release}`");
+        }
+        remote
+    } else {
+        vec![tag.to_string()]
+    };
+    for t in &tags {
+        let outcome = crate::index::fetch::fetch_shard(cache, t, release, force)?;
+        if outcome.skipped {
+            eprintln!(
+                "shard {} (vk.xml {}) already present — skipping (use --force to re-download)",
+                outcome.tag,
+                short_sha(&outcome.vkxml_sha)
+            );
+        } else {
+            eprintln!(
+                "fetched shard {} (vk.xml {}, {:.1} MB) → {}",
+                outcome.tag,
+                short_sha(&outcome.vkxml_sha),
+                outcome.downloaded_bytes as f64 / (1024.0 * 1024.0),
+                outcome.shard_dir.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn short_sha(sha: &str) -> &str {
+    &sha[..sha.len().min(12)]
 }
 
 fn run_config(json: bool) -> Result<()> {
