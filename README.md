@@ -67,6 +67,11 @@ environment" to "download a 4MB binary".
 | `vuid <id>` | rule text + source file + guard extensions |
 | `search <query> [--mode bm25\|embed\|hybrid]` | BM25 / semantic / hybrid over prose + VUID text |
 
+Commands print a **human-readable summary by default** — a screenful,
+with long VUID lists paged (20 at a time; `--all-vuids` or `--vuid-offset
+N` to page, `--limit` for extension lists). Add `--json` to any query for
+the full machine-readable payload.
+
 ## Install
 
 ```bash

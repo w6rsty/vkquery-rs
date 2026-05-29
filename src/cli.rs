@@ -47,6 +47,30 @@ const SEARCH_MODES: [&str; 3] = ["bm25", "embed", "hybrid"];
 #[cfg(not(feature = "embed"))]
 const SEARCH_MODES: [&str; 1] = ["bm25"];
 
+/// VUID paging flags shared by `function` and `struct`. Only affects the
+/// human-readable output; `--json` always emits the full VUID list.
+#[derive(clap::Args, Debug, Clone)]
+pub struct VuidArgs {
+    /// Max VUIDs to print (human mode). Use --all-vuids for everything.
+    #[arg(long, default_value_t = 20)]
+    pub vuid_limit: usize,
+    /// Skip this many VUIDs before printing (human mode paging).
+    #[arg(long, default_value_t = 0)]
+    pub vuid_offset: usize,
+    /// Print every VUID (equivalent to --vuid-limit 0).
+    #[arg(long)]
+    pub all_vuids: bool,
+}
+
+impl VuidArgs {
+    fn paging(&self) -> crate::format::VuidPaging {
+        crate::format::VuidPaging {
+            limit: if self.all_vuids { 0 } else { self.vuid_limit },
+            offset: self.vuid_offset,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
     /// Lookup a function.
@@ -54,6 +78,8 @@ pub enum Cmd {
         name: String,
         #[arg(long, default_value = "HEAD")]
         tag: String,
+        #[command(flatten)]
+        vuids: VuidArgs,
         #[arg(long)]
         json: bool,
     },
@@ -62,6 +88,8 @@ pub enum Cmd {
         name: String,
         #[arg(long, default_value = "HEAD")]
         tag: String,
+        #[command(flatten)]
+        vuids: VuidArgs,
         #[arg(long)]
         json: bool,
     },
@@ -75,6 +103,9 @@ pub enum Cmd {
         author: Option<String>,
         #[arg(long, value_parser = ["active", "promoted", "deprecated", "obsoleted"])]
         status: Option<String>,
+        /// Max rows to print in human mode (0 = all). Ignored with --json.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
         #[arg(long)]
         json: bool,
     },
@@ -124,6 +155,8 @@ pub enum Cmd {
         #[cfg(not(feature = "embed"))]
         #[arg(long, value_parser = SEARCH_MODES, default_value = "bm25")]
         mode: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Index management.
     Index {
@@ -185,37 +218,69 @@ pub enum CacheAction {
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Function { name, tag, json } => {
+        Cmd::Function { name, tag, vuids, json } => {
             let info = crate::api::get_function(&name, &tag)?;
-            emit(&info, json)
+            if json {
+                emit_json(&info)
+            } else {
+                emit_human(crate::format::function_summary(&info, vuids.paging()))
+            }
         }
-        Cmd::Struct { name, tag, json } => {
+        Cmd::Struct { name, tag, vuids, json } => {
             let info = crate::api::get_struct(&name, &tag)?;
-            emit(&info, json)
+            if json {
+                emit_json(&info)
+            } else {
+                emit_human(crate::format::struct_summary(&info, vuids.paging()))
+            }
         }
-        Cmd::Extensions { tag, r#type, author, status, json } => {
+        Cmd::Extensions { tag, r#type, author, status, limit, json } => {
             let exts = crate::api::list_extensions(&tag, r#type.as_deref(), author.as_deref(), status.as_deref())?;
-            emit(&exts, json)
+            if json {
+                emit_json(&exts)
+            } else {
+                emit_human(crate::format::extensions_summary(&exts, limit))
+            }
         }
         Cmd::Callers { r#type, tag, json } => {
             let info = crate::api::find_callers(&r#type, &tag)?;
-            emit(&info, json)
+            if json {
+                emit_json(&info)
+            } else {
+                emit_human(crate::format::callers_summary(&info))
+            }
         }
         Cmd::Deps { name, tag, json } => {
             let dg = crate::api::find_dependencies(&name, &tag)?;
-            emit(&dg, json)
+            if json {
+                emit_json(&dg)
+            } else {
+                emit_human(crate::format::deps_summary(&dg))
+            }
         }
         Cmd::Vuid { vuid_id, tag, json } => {
             let v = crate::api::get_vuid(&vuid_id, &tag)?;
-            emit(&v, json)
+            if json {
+                emit_json(&v)
+            } else {
+                emit_human(crate::format::vuid_summary(&v))
+            }
         }
-        Cmd::Diff { v1, v2, entity, json: _ } => {
+        Cmd::Diff { v1, v2, entity, json } => {
             let report = crate::index::diff::diff_versions(&v1, &v2, entity.as_deref())?;
-            emit(&report, true)
+            if json {
+                emit_json(&report)
+            } else {
+                emit_human(crate::format::diff_summary(&report))
+            }
         }
-        Cmd::Search { query, tag, k, mode } => {
+        Cmd::Search { query, tag, k, mode, json } => {
             let hits = crate::api::search_concept(&query, &tag, k, &mode)?;
-            emit(&hits, true)
+            if json {
+                emit_json(&hits)
+            } else {
+                emit_human(crate::format::search_summary(&hits))
+            }
         }
         Cmd::Index { action } => run_index(action),
         Cmd::Docs { action } => run_docs(action),
@@ -226,11 +291,17 @@ pub fn run() -> Result<()> {
     }
 }
 
-fn emit<T: serde::Serialize>(value: &T, _as_json: bool) -> Result<()> {
-    // We always emit JSON for now (matching the Python CLI, which also
-    // defaults to JSON). The `--json` flag is reserved for future
-    // human-friendly output.
+/// Emit the full structured payload as pretty JSON (the `--json` path and the
+/// machine-readable contract the library / MCP consumers rely on).
+fn emit_json<T: serde::Serialize>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+/// Emit a pre-rendered human summary. `format::*` already end with a newline
+/// per line via `writeln!`, so print without an extra trailing blank line.
+fn emit_human(text: String) -> Result<()> {
+    print!("{text}");
     Ok(())
 }
 
